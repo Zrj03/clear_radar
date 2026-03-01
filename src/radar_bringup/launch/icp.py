@@ -7,8 +7,8 @@ from tf2_geometry_msgs.tf2_geometry_msgs import _get_quat_from_mat, _build_affin
 def generate_launch_description():
     return LaunchDescription([
         Node(
-            package='livox_v2_lidar',
-            executable='livox_v2_lidar_node',
+            package='livox_v1_lidar',
+            executable='livox_v1_lidar_node',
             namespace='hap',
         ),
         Node(

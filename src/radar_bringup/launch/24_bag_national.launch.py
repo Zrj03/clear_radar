@@ -193,14 +193,14 @@ def generate_launch_description():
                 0.49561537544531076,
                 0.4977604777199716,
                 0.5072338976832756
-            ], 'lidar_hap_frame', 'hik_6mm_frame'
+            ], 'lidar_mid70_frame', 'hik_6mm_frame'
         ),
         *get_pc_container(),
         get_matrix_tf_broadcaster(
             np.array([[0.90805441,  0.00851127,  0.41876575,  0.05435923],
                       [0.00681501, -0.9999614,  0.00554616, -0.01593622],
                       [0.41879679, -0.00218231, -0.90807736, -0.07701991],
-                      [0.,  0.,  0.,  1.],]), 'lidar_hap_frame', 'lidar_mid70_frame'),
+                      [0.,  0.,  0.,  1.],]), 'lidar_mid70_frame', 'lidar_mid70_frame'),
         Node(
             package='radar_utils',
             executable='marker_pub',

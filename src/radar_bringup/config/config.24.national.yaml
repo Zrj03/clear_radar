@@ -1,6 +1,6 @@
 /radar/pc_aligner:
   ros__parameters:
-    sample_lidar: 'lidar_hap'
+    sample_lidar: 'lidar_mid70'
     # 初始化采样点云数目
     init_sample: 1000000
     # 对齐器采样模型点数
@@ -29,7 +29,7 @@
   ros__parameters:
     # 缓冲区帧数
     node.buffer_frame_size: 12
-    node.lidars: ['lidar_hap', 'lidar_mid70']
+    node.lidars: ['lidar_mid70']
 
     mesh.mesh_ori: "24_bg2align_fix1.stl"
     mesh.mesh_filter: "24_bg2filter_fix1.stl"
