@@ -10,6 +10,7 @@ find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies(REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/RadarWarn.msg"
   "msg/DetectedTarget.msg"
   "msg/DetectedTargetArray.msg"
   "msg/Target.msg"

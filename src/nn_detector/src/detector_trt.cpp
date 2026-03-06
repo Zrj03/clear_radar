@@ -43,9 +43,9 @@ DetectorTRT::DetectorTRT(const std::string &config_file, const std::string &shar
                          const rclcpp::Logger &_logger, CUcontext *ctx)
     : NetDetector(config_file, share_dir, _logger), trt_logger(_logger), cuda_ctx(ctx) {
     std::string model_onnx = model_prefix + ".onnx";
-    std::string model_cache = model_prefix + ".cache";
+    std::string model_cache = model_prefix + ".engine";
 
-    RCLCPP_INFO(logger, "[TRT] loading cache: %s", model_cache.c_str());
+    RCLCPP_INFO(logger, "[TRT] loading engine/cache: %s", model_cache.c_str());
     runtime = std::shared_ptr<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(trt_logger));
 
     std::stringstream egsr;

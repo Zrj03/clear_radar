@@ -34,7 +34,7 @@ def show_coordinates(event, x, y, flags, param):
 def main():
     global img, ori_img
     ori_img = cv2.imread(os.path.join(
-        get_package_share_directory('radar_bringup'), 'resource', 'map.png'))
+        get_package_share_directory('radar_bringup'), 'resource', 'RM2026-1.png'))
     img = ori_img.copy()
     cv2.namedWindow('Image')
     cv2.setMouseCallback('Image', show_coordinates)

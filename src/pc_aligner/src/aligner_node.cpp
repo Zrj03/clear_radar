@@ -38,6 +38,8 @@ AlignerNode::AlignerNode() : Node("pc_aligner")
     auto init_trans = declare_parameter("init_trans", std::vector<double> { 0., 0., 0., 1., 0., 0., 0. });
 
     middle_tf = std::make_shared<geometry_msgs::msg::TransformStamped>();
+    middle_tf->header.frame_id = get_parameter("sample_lidar").as_string() + "_frame";
+    middle_tf->child_frame_id = "middle";
     middle_tf->transform.translation.x = init_trans[0];
     middle_tf->transform.translation.y = init_trans[1];
     middle_tf->transform.translation.z = init_trans[2];
@@ -48,7 +50,6 @@ AlignerNode::AlignerNode() : Node("pc_aligner")
 
     tf_buffer = std::make_shared<tf2_ros::Buffer>(get_clock());
     tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer);
-    tf_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(this);
     tf_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(this);
     marker_pub = create_publisher<visualization_msgs::msg::MarkerArray>("selected_point", tf2_ros::StaticBroadcasterQoS());
     prepare_meshes();
@@ -79,11 +80,11 @@ void AlignerNode::start_sample(std::function<void(std::shared_ptr<open3d::geomet
 
 void AlignerNode::timer_callback()
 {
-    if (world_tf) {
+    if (world_tf && !world_tf->header.frame_id.empty() && !world_tf->child_frame_id.empty()) {
         world_tf->header.stamp = now();
         tf_broadcaster->sendTransform(*world_tf);
     }
-    if (middle_tf) {
+    if (middle_tf && !middle_tf->header.frame_id.empty() && !middle_tf->child_frame_id.empty()) {
         middle_tf->header.stamp = now();
         tf_broadcaster->sendTransform(*middle_tf);
     }
@@ -166,11 +167,27 @@ void AlignerNode::sample_sub_callback(const sensor_msgs::msg::PointCloud2 &msg)
     }
     if (!radar_interface::check_lidar_msg(msg))
         return;
-    const radar_interface::LivoxPointXyzrtlt *points = reinterpret_cast<const radar_interface::LivoxPointXyzrtlt *>(msg.data.data());
+
+    const auto* field_x = radar_interface::find_lidar_field(msg, "x");
+    const auto* field_y = radar_interface::find_lidar_field(msg, "y");
+    const auto* field_z = radar_interface::find_lidar_field(msg, "z");
+    const auto* field_intensity = radar_interface::find_lidar_field(msg, "intensity");
+    if (!field_x || !field_y || !field_z)
+        return;
+
+    const uint8_t* raw = msg.data.data();
     for (size_t i = 0; i < msg.height * msg.width; ++i)
     {
-        pc_sample_context->recv_pc->points_.emplace_back(points[i].x, points[i].y, points[i].z);
-        pc_sample_context->recv_pc->colors_.emplace_back(open3d::visualization::GetGlobalColorMap()->GetColor(points[i].reflectivity / 150.0));
+        const uint8_t* point = raw + i * msg.point_step;
+        float x, y, z, intensity = 0.0f;
+        std::memcpy(&x, point + field_x->offset, sizeof(float));
+        std::memcpy(&y, point + field_y->offset, sizeof(float));
+        std::memcpy(&z, point + field_z->offset, sizeof(float));
+        if (field_intensity && field_intensity->datatype == sensor_msgs::msg::PointField::FLOAT32 && field_intensity->offset + sizeof(float) <= msg.point_step) {
+            std::memcpy(&intensity, point + field_intensity->offset, sizeof(float));
+        }
+        pc_sample_context->recv_pc->points_.emplace_back(x, y, z);
+        pc_sample_context->recv_pc->colors_.emplace_back(open3d::visualization::GetGlobalColorMap()->GetColor(intensity / 150.0));
     }
     if (pc_sample_context->recv_pc->points_.size() >= pc_sample_context->sample_size)
     {

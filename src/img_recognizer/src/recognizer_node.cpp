@@ -13,6 +13,7 @@ RecognizerNode::RecognizerNode(const rclcpp::NodeOptions& options)
 {
     declare_parameter("target_topic", "/radar/pc_detector/targets");
     declare_parameter("sync_queue_size", 20);
+    declare_parameter("sync_max_interval", 1.0);
     declare_parameter("crop_side_length", 1500.0);
     declare_parameter("img_compressed", false);
     declare_parameter("jigsaw_size", 3);
@@ -57,6 +58,7 @@ RecognizerNode::RecognizerNode(const rclcpp::NodeOptions& options)
         img_sub.subscribe(this, ex_name("image"), "raw");
     pc_target_sub.subscribe(this, get_parameter("target_topic").as_string());
     sync = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(SyncPolicy(get_parameter("sync_queue_size").as_int()), img_sub, pc_target_sub);
+    sync->setMaxIntervalDuration(rclcpp::Duration::from_seconds(get_parameter("sync_max_interval").as_double()));
     sync->registerCallback(std::bind(&RecognizerNode::sync_callback, this, std::placeholders::_1, std::placeholders::_2));
 
     // markers_pub = this->create_publisher<foxglove_msgs::msg::ImageMarkerArray>("img_recognizer/markers", rclcpp::QoS(rclcpp::KeepLast(10)));

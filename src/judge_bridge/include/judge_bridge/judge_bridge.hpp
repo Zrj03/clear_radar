@@ -63,6 +63,9 @@ private:
     void game_robot_hp_callback(const game_robot_HP_t& hp);
     void interaction_data_callback(const std::vector<uint8_t>& data);
 
+    void check_enemy_invasion(const radar_interface::msg::MatchResult& msg);
+    void send_invasion_alert(const radar_interface::msg::MatchResult& msg);
+
     void send_sentry_data(const radar_interface::msg::MatchResult& topic_message);
     void send_radar_cmd(const std_msgs::msg::UInt8 &radar_cmd);
 

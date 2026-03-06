@@ -27,8 +27,17 @@ configs = {
 class TargetVisualizer(Node):
     def __init__(self):
         super().__init__('target_visualizer')
+        self.declare_parameter('im_show', True)
         self.get_logger().info('Initializing target_visualizer...')
-        self.ori_img = cv2.imread(os.path.join(get_package_share_directory('radar_bringup'), 'resource', 'map.png'))
+        self.ori_img = cv2.imread(os.path.join(get_package_share_directory('radar_bringup'), 'resource', 'RM2026-1.png'))
+        
+        # 对原始图像尺寸进行一定限制，避免新地图过大导致 OpenCV 弹框占满屏幕及拖慢系统资源
+        max_visual_width = 1200
+        if self.ori_img is not None and self.ori_img.shape[1] > max_visual_width:
+            scale = max_visual_width / self.ori_img.shape[1]
+            new_h = int(self.ori_img.shape[0] * scale)
+            self.ori_img = cv2.resize(self.ori_img, (max_visual_width, new_h))
+            
         self.img_pub = self.create_publisher(Image, 'target_image', 10)
         self.target_sub = self.create_subscription(TargetArray, 'pc_detector/targets', self.target_callback, 10)
         self.get_logger().info('Initialized target_visualizer.')
@@ -53,6 +62,10 @@ class TargetVisualizer(Node):
             # width = mah_dis * np.sqrt(w[0])
             # height = mah_dis * np.sqrt(w[1])
             # cv2.ellipse(now_img, (im_x, im_y), (int(width), int(height)), angle / np.pi * 180, 0, 360, (255, 0, 255), 2)
+        if self.get_parameter('im_show').get_parameter_value().bool_value:
+            cv2.namedWindow('target_visualizer', cv2.WINDOW_NORMAL)
+            cv2.imshow('target_visualizer', now_img)
+            cv2.waitKey(1)
         
         img = Image()
         img.height = now_img.shape[0]

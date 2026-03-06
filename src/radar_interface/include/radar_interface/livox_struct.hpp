@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <optional>
+#include <cstring>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
@@ -20,10 +21,21 @@ typedef struct {
 } LivoxPointXyzrtlt;
 #pragma pack(pop)
 
+inline const sensor_msgs::msg::PointField* find_lidar_field(
+    const sensor_msgs::msg::PointCloud2& msg, const char* name)
+{
+    for (const auto& field : msg.fields) {
+        if (field.name == name) {
+            return &field;
+        }
+    }
+    return nullptr;
+}
+
 inline bool check_lidar_msg(const sensor_msgs::msg::PointCloud2& msg)
 {
     // Size check
-    if (msg.point_step != sizeof(radar_interface::LivoxPointXyzrtlt)) {
+    if (msg.point_step == 0) {
         RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud point_step error: %d", msg.point_step);
         return false;
     }
@@ -35,37 +47,24 @@ inline bool check_lidar_msg(const sensor_msgs::msg::PointCloud2& msg)
         RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud data size error: %lu", msg.data.size());
         return false;
     }
-    // Field check
-    if (msg.fields.size() != 7) {
-        RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud fields size error: %lu", msg.fields.size());
+    // Field check (兼容不同livox点格式: 18-byte/26-byte等)
+    auto field_x = find_lidar_field(msg, "x");
+    auto field_y = find_lidar_field(msg, "y");
+    auto field_z = find_lidar_field(msg, "z");
+    if (!field_x || !field_y || !field_z) {
+        RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud required xyz fields missing");
         return false;
     }
-    if (msg.fields[0].name != "x" || msg.fields[0].offset != 0 || msg.fields[0].datatype != sensor_msgs::msg::PointField::FLOAT32 || msg.fields[0].count != 1) {
-        RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud fields[0] error");
+    if (field_x->datatype != sensor_msgs::msg::PointField::FLOAT32 || field_x->count != 1 || field_x->offset + sizeof(float) > msg.point_step) {
+        RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud field x format error");
         return false;
     }
-    if (msg.fields[1].name != "y" || msg.fields[1].offset != 4 || msg.fields[1].datatype != sensor_msgs::msg::PointField::FLOAT32 || msg.fields[1].count != 1) {
-        RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud fields[1] error");
+    if (field_y->datatype != sensor_msgs::msg::PointField::FLOAT32 || field_y->count != 1 || field_y->offset + sizeof(float) > msg.point_step) {
+        RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud field y format error");
         return false;
     }
-    if (msg.fields[2].name != "z" || msg.fields[2].offset != 8 || msg.fields[2].datatype != sensor_msgs::msg::PointField::FLOAT32 || msg.fields[2].count != 1) {
-        RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud fields[2] error");
-        return false;
-    }
-    if (msg.fields[3].name != "intensity" || msg.fields[3].offset != 12 || msg.fields[3].datatype != sensor_msgs::msg::PointField::FLOAT32 || msg.fields[3].count != 1) {
-        RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud fields[3] error");
-        return false;
-    }
-    if (msg.fields[4].name != "tag" || msg.fields[4].offset != 16 || msg.fields[4].datatype != sensor_msgs::msg::PointField::UINT8 || msg.fields[4].count != 1) {
-        RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud fields[4] error");
-        return false;
-    }
-    // if (msg.fields[5].name != "tag" || msg.fields[5].offset != 17 || msg.fields[5].datatype != sensor_msgs::msg::PointField::UINT8 || msg.fields[4].count != 1) {
-    //     RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud fields[4] error");
-    //     return false;
-    // }
-    if (msg.fields[6].name != "timestamp" || msg.fields[6].offset != 18 || msg.fields[6].datatype != sensor_msgs::msg::PointField::FLOAT64 || msg.fields[5].count != 1) {
-        RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud fields[6] error");
+    if (field_z->datatype != sensor_msgs::msg::PointField::FLOAT32 || field_z->count != 1 || field_z->offset + sizeof(float) > msg.point_step) {
+        RCLCPP_ERROR(rclcpp::get_logger("check_lidar_msg"), "point cloud field z format error");
         return false;
     }
     return true;

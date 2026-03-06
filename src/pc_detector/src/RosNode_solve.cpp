@@ -91,10 +91,22 @@ void DetectorNode::pc_recv_callback(const sensor_msgs::msg::PointCloud2& msg, co
         RCLCPP_ERROR(get_logger(), "point cloud size error: %lu", msg.data.size());
         return;
     }
-    auto points = reinterpret_cast<const radar_interface::LivoxPointXyzrtlt*>(msg.data.data());
+
+    const auto* field_x = radar_interface::find_lidar_field(msg, "x");
+    const auto* field_y = radar_interface::find_lidar_field(msg, "y");
+    const auto* field_z = radar_interface::find_lidar_field(msg, "z");
+    if (!field_x || !field_y || !field_z)
+        return;
+
+    const uint8_t* raw = msg.data.data();
     for (size_t i = 0; i < msg.height * msg.width; ++i)
     {
-        Eigen::Vector3d pt(points[i].x, points[i].y, points[i].z);
+        const uint8_t* point = raw + i * msg.point_step;
+        float x, y, z;
+        std::memcpy(&x, point + field_x->offset, sizeof(float));
+        std::memcpy(&y, point + field_y->offset, sizeof(float));
+        std::memcpy(&z, point + field_z->offset, sizeof(float));
+        Eigen::Vector3d pt(x, y, z);
         pt = l_ctx->trans * pt;
         // RCLCPP_INFO(get_logger(), "pt: %f, %f, %f, tag=%d, occc=%d", pt(0), pt(1), pt(2), points[i].tag, voxel_grid.is_occupied(pt));
         // 过滤 https://www.livoxtech.com/cn/showcase/livox-tag

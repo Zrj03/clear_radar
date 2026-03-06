@@ -32,8 +32,18 @@ class ResultVisualizer(Node):
     def __init__(self):
         super().__init__('result_visualizer')
         self.declare_parameter('im_show', True)
+        self.declare_parameter('show_ally', True)
+        self.declare_parameter('show_enemy', True)
         self.get_logger().info('Initializing result_visualizer...')
-        self.ori_img = cv2.imread(os.path.join(get_package_share_directory('radar_bringup'), 'resource', 'map.png'))
+        self.ori_img = cv2.imread(os.path.join(get_package_share_directory('radar_bringup'), 'resource', 'RM2026-1.png'))
+        
+        # 限制原图最大宽度，防止高分辨率地图导致窗口过大
+        max_visual_width = 1200
+        if self.ori_img is not None and self.ori_img.shape[1] > max_visual_width:
+            scale = max_visual_width / self.ori_img.shape[1]
+            new_h = int(self.ori_img.shape[0] * scale)
+            self.ori_img = cv2.resize(self.ori_img, (max_visual_width, new_h))
+            
         self.img_pub = self.create_publisher(Image, 'result_image', 10)
         self.target_sub = self.create_subscription(
             MatchResult, 'matcher/match_result', self.target_callback, 10)
@@ -59,7 +69,17 @@ class ResultVisualizer(Node):
             cv2.putText(now_img, 'BLUE', (10, 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 0, 0), 4)
 
-        def draw(is_red: bool, num: int, target: MatchedTarget):
+        ally_is_red = self.team_color
+        enemy_is_red = not self.team_color
+
+        ally_color = (0, 0, 255) if ally_is_red else (255, 0, 0)
+        enemy_color = (0, 0, 255) if enemy_is_red else (255, 0, 0)
+        cv2.putText(now_img, 'ALLY', (10, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, ally_color, 2)
+        cv2.putText(now_img, 'ENEMY', (10, 110),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, enemy_color, 2)
+
+        def draw(is_red: bool, num: int, target: MatchedTarget, is_ally: bool):
             if target.id == -1:
                 return
             try:
@@ -68,24 +88,32 @@ class ResultVisualizer(Node):
                 im_y = int(
                     (1 - target.position[1] / configs['real_height']) * self.ori_img.shape[0])
                 color = (0, 0, 255) if is_red else (255, 0, 0)
-                dimmed_color = (color[0] // 2, color[1] // 2, color[2] // 2)
+                # 我方和敌方都使用我方/敌方颜色的实心圆圈 + 编号
                 cv2.circle(now_img, (im_x, im_y), 20, color, -1)
-                cv2.circle(now_img, (im_x, im_y), 20, dimmed_color, 4)
-                cv2.putText(now_img, str(num), (im_x -10, im_y +10),
+                cv2.putText(now_img, str(num), (im_x - 10, im_y + 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
                 if is_red and not self.team_color:
-                    cv2.putText(now_img, f"{self.mark[i]}/120", (im_x - 20, im_y + 40),
+                    cv2.putText(now_img, f"{self.mark[num]}/120", (im_x - 20, im_y + 40),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
                 if not is_red and self.team_color:
-                    cv2.putText(now_img, f"{self.mark[i]}/120", (im_x - 20, im_y + 40),
+                    cv2.putText(now_img, f"{self.mark[num]}/120", (im_x - 20, im_y + 40),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
             except IndexError as e:
                 self.get_logger().error(f"Error in drawing: {e}")
 
-        for i, target in enumerate(msg.red):
-            draw(True, i, target)
-        for i, target in enumerate(msg.blue):
-            draw(False, i, target)
+        if ally_is_red:
+            ally_targets, enemy_targets = msg.red, msg.blue
+            ally_red, enemy_red = True, False
+        else:
+            ally_targets, enemy_targets = msg.blue, msg.red
+            ally_red, enemy_red = False, True
+
+        if self.get_parameter('show_ally').value:
+            for i, target in enumerate(ally_targets):
+                draw(ally_red, i, target, True)
+        if self.get_parameter('show_enemy').value:
+            for i, target in enumerate(enemy_targets):
+                draw(enemy_red, i, target, False)
 
         img = Image()
         img.height = now_img.shape[0]
@@ -96,6 +124,7 @@ class ResultVisualizer(Node):
         img.data = now_img.tobytes()
         self.img_pub.publish(img)
         if self.get_parameter('im_show').value:
+            cv2.namedWindow('result', cv2.WINDOW_NORMAL)
             cv2.imshow('result', now_img)
             cv2.waitKey(1)
 

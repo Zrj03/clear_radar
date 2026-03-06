@@ -134,6 +134,17 @@ def get_pc_container():
                     parameters=[node_params],
                     extra_arguments=[{'use_intra_process_comms': True}]
                 ),
+                ComposableNode(
+                    package='nn_detector',
+                    plugin='nn_detector::DetectorNode',
+                    name='nn_detector',
+                    namespace='radar',
+                    parameters=[node_params],
+                    remappings=[
+                        ('lidar_mid70/livox/pointcloud', 'lidar_mid70/pc_raw'),
+                    ],
+                    extra_arguments=[{'use_intra_process_comms': True}]
+                ),
             ],
             output='both',
             emulate_tty=True,
@@ -161,6 +172,16 @@ def get_pc_container():
                 name='pc_detector',
                 namespace='radar',
                 parameters=[node_params],
+            ),
+            Node(
+                package='nn_detector',
+                executable='nn_detector_node',
+                name='nn_detector',
+                namespace='radar',
+                parameters=[node_params],
+                remappings=[
+                    ('lidar_mid70/livox/pointcloud', 'lidar_mid70/pc_raw'),
+                ],
             ),
         )
 
@@ -192,7 +213,33 @@ def generate_launch_description():
             np.array([[0.90805441,  0.00851127,  0.41876575,  0.05435923],
                       [0.00681501, -0.9999614,  0.00554616, -0.01593622],
                       [0.41879679, -0.00218231, -0.90807736, -0.07701991],
-                      [0.,  0.,  0.,  1.],]), 'lidar_mid70_frame', 'lidar_mid70_frame'),
+                      [0.,  0.,  0.,  1.],]), 'map', 'lidar_mid70_frame'),
+
+        # world到map的TF树
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='world_to_map',
+            namespace='radar',
+            arguments=['--x', '0', '--y', '0', '--z', '0', '--yaw', '0', '--pitch', '0', '--roll', '0', '--frame-id', 'world', '--child-frame-id', 'map']
+        ),
+
+        # 手动标定节点：调整下面的x, y, z和yaw(单位:弧度)使其与地图对齐
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     namespace='radar',
+        #     name='map_to_lidar_manual',
+        #     arguments=['--x', '0.0', 
+        #                '--y', '0.0', 
+        #                '--z', '0.0', 
+        #                '--yaw', '0.0', 
+        #                '--pitch', '0.0', 
+        #                '--roll', '0.0', 
+        #                '--frame-id', 'map', 
+        #                '--child-frame-id', 'lidar_mid70_frame'],
+        # ),
+
         Node(
             package='radar_utils',
             executable='marker_pub',
@@ -247,16 +294,27 @@ def generate_launch_description():
             package='foxglove_bridge',
             executable='foxglove_bridge',
         ),
-        Node(
-            package='target_visualizer',
-            executable='target_visualizer',
-            namespace='radar',
-            output='both',
-        ),
+        # Node(
+        #     package='target_visualizer',
+        #     executable='target_visualizer',
+        #     namespace='radar',
+        #     output='both',
+        # ),
         Node(
             package='result_visualizer',
             executable='result_visualizer',
             namespace='radar',
             output='both',
+        ),
+        # Gimbal Serial node：接收/radar/uav_target并通过串口控制云台
+        Node(
+            package='serial_node',
+            executable='gimbal_serial',
+            name='gimbal_serial',
+            output='both',
+            parameters=[
+                {'port': '/dev/ttyACM0'},
+                {'baud': 115200},
+            ],
         ),
     ])

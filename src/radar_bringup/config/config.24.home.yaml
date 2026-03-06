@@ -20,19 +20,19 @@
     manual_crop.min: [0., -5., -5.]
     manual_crop.max: [10., 5., 5.]
 
-    align_model: "pointcloud"
-    pointcloud: "output.pcd"
+    align_model: "mesh"
+    mesh: "home_demo.stl"
     init_translate: [0.0, 0.0, 0.0]
 
 /radar/pc_detector:
   ros__parameters:
-    # 缓冲区帧数
-    node.buffer_frame_size: 10
+    # 缓冲区帧数（时间累计）
+    node.buffer_frame_size: 30
     node.lidars: ['lidar_mid70']
 
-    mesh.filter_mode: "pointcloud"
+    mesh.filter_mode: "mesh"
     mesh.mesh_ori: "home_demo.stl"
-    mesh.pc_filter: "output.pcd"
+    mesh.mesh_filter: "home_demo.stl"
     mesh.init_translate: [0.0, 0.0, 0.0]
 
     # 体素网格滤波器体素大小 单位: m
@@ -107,7 +107,7 @@
     img_compressed: False
     jigsaw_size: 3
     img_size: 640
-    armor_detector_config: "models/v5.1_R803D.toml"
+    armor_detector_config: "models/armor_detr.toml"
 
 /radar/matcher:
   ros__parameters:

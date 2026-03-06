@@ -14,6 +14,13 @@ set(VINO_FALLBACK ON)
 # find ament_cmake
 find_package(ament_cmake_auto REQUIRED)
 find_package(radar_interface REQUIRED)
+
+# PCL
+find_package(PCL REQUIRED)
+add_definitions(${PCL_DEFINITIONS})
+set(include ${PCL_INCLUDE_DIRS} ${include})
+set(link ${PCL_LIBRARIES} ${link})
+
 ament_auto_find_build_dependencies()
 
 # OpenCV

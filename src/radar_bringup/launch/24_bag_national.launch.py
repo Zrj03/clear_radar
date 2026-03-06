@@ -1,4 +1,6 @@
 from launch import LaunchDescription, actions
+from launch.substitutions import LaunchConfiguration
+from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 from tf2_geometry_msgs.tf2_geometry_msgs import _get_quat_from_mat, _build_affine, _decompose_affine
@@ -82,7 +84,8 @@ def get_vision_container(cam_name: str):
                     parameters=[
                         node_params,
                         {'use_sim_time': True,
-                         'img_compressed': True},
+                         'img_compressed': True,
+                         'sync_max_interval': 120.0},
                         ],
                     extra_arguments=[{'use_intra_process_comms': True}]
                 ),
@@ -93,15 +96,26 @@ def get_vision_container(cam_name: str):
         ),)
     else:
         return (
-            # Node(
-            #     package='hik_camera',
-            #     executable='info_pub',
-            #     namespace='radar/' + cam_name,
-            #     parameters=[
-            #         {'use_sim_time': True},
-            #         node_params,
-            #     ],
-            # ),
+            Node(
+                package='radar_utils',
+                executable='compressed_image_restamper',
+                namespace='radar/' + cam_name,
+                parameters=[
+                    {'use_sim_time': True,
+                     'input_topic': 'image/compressed_raw',
+                     'output_topic': 'image/compressed',
+                     'frame_id': cam_name + '_frame'},
+                ],
+            ),
+            Node(
+                package='hik_camera',
+                executable='info_pub',
+                namespace='radar/' + cam_name,
+                parameters=[
+                    {'use_sim_time': True},
+                    node_params,
+                ],
+            ),
             Node(
                 package='img_recognizer',
                 executable='img_recognizer_node',
@@ -109,7 +123,8 @@ def get_vision_container(cam_name: str):
                 parameters=[
                     node_params,
                     {'use_sim_time': True,
-                     'img_compressed': True},
+                     'img_compressed': True,
+                     'sync_max_interval': 120.0},
                 ],
             ),
         )
@@ -149,6 +164,18 @@ def get_pc_container():
                                 {'use_sim_time': True}],
                     extra_arguments=[{'use_intra_process_comms': True}]
                 ),
+                # ComposableNode(
+                #     package='nn_detector',
+                #     plugin='nn_detector::DetectorNode',
+                #     name='nn_detector',
+                #     namespace='radar',
+                #     parameters=[node_params,
+                #                 {'use_sim_time': True}],
+                #     remappings=[
+                #         ('lidar_mid70/livox/pointcloud', 'lidar_mid70/pc_raw'),
+                #     ],
+                #     extra_arguments=[{'use_intra_process_comms': True}]
+                # ),
             ],
             output='both',
             emulate_tty=True,
@@ -178,11 +205,28 @@ def get_pc_container():
                 parameters=[node_params,
                             {'use_sim_time': True}],
             ),
+            # Node(
+            #     package='nn_detector',
+            #     executable='nn_detector_node',
+            #     name='nn_detector',
+            #     namespace='radar',
+            #     parameters=[node_params,
+            #                 {'use_sim_time': True}],
+            #     remappings=[
+            #         ('lidar_mid70/livox/pointcloud', 'lidar_mid70/pc_raw'),
+            #     ],
+            # ),
         )
 
 
 def generate_launch_description():
+    startup_manual_align = LaunchConfiguration('startup_manual_align')
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'startup_manual_align',
+            default_value='false',
+            description='Whether to run manual alignment on startup in bag mode'
+        ),
         *get_vision_container('hik_6mm'),
         get_xyzw_tf_broadcaster(
             [
@@ -200,7 +244,9 @@ def generate_launch_description():
             np.array([[0.90805441,  0.00851127,  0.41876575,  0.05435923],
                       [0.00681501, -0.9999614,  0.00554616, -0.01593622],
                       [0.41879679, -0.00218231, -0.90807736, -0.07701991],
-                      [0.,  0.,  0.,  1.],]), 'lidar_mid70_frame', 'lidar_mid70_frame'),
+                      [0.,  0.,  0.,  1.],]), 'map', 'lidar_mid70_frame'),
+
+
         Node(
             package='radar_utils',
             executable='marker_pub',
@@ -213,6 +259,7 @@ def generate_launch_description():
             executable='pc_aligner',
             namespace='radar',
             parameters=[node_params,
+                        {'startup_manual_align': startup_manual_align},
                         {'use_sim_time': True}],
             output='both',
         ),
@@ -247,15 +294,15 @@ def generate_launch_description():
                         {'use_sim_time': True}],
             output='both',
         ),
-        Node(
-            package='judge_bridge',
-            executable='judge_bridge',
-            name='judge_bridge',
-            namespace='radar',
-            parameters=[node_params,
-                        {'use_sim_time': True}],
-            output='both',
-        ),
+        # Node(
+        #     package='judge_bridge',
+        #     executable='judge_bridge',
+        #     name='judge_bridge',
+        #     namespace='radar',
+        #     parameters=[node_params,
+        #                 {'use_sim_time': True}],
+        #     output='both',
+        # ),
         Node(
             package='foxglove_bridge',
             executable='foxglove_bridge',
@@ -272,4 +319,16 @@ def generate_launch_description():
             namespace='radar',
             output='both',
         ),
+        # Gimbal Serial node：接收/radar/uav_target并通过串口控制云台
+        # Node(
+        #     package='serial_node',
+        #     executable='gimbal_serial',
+        #     name='gimbal_serial',
+        #     output='both',
+        #     parameters=[
+        #         {'port': '/dev/ttyACM0'},
+        #         {'baud': 115200},
+        #         {'use_sim_time': True},
+        #     ],
+        # ),
     ])

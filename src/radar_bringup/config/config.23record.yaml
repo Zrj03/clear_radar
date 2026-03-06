@@ -100,7 +100,7 @@
     img_compressed: True
     jigsaw_size: 3
     img_size: 640
-    armor_detector_config: "models/v5.1_R803D.toml"
+    armor_detector_config: "models/armor_detr.toml"
     enable_imshow: True
 
 /radar/matcher:

@@ -7,7 +7,7 @@ from .status_button import StatusButton, QVBoxLayout
 import rclpy
 import rclpy.qos
 from rclpy.node import Node
-from foxglove_msgs.msg import ImageMarkerArray, ImageAnnotations
+from foxglove_msgs.msg import ImageAnnotations
 from radar_interface.msg import DetectedTargetArray
 
 
@@ -23,13 +23,7 @@ class ImgRecognizer:
         self.button_.set_text(f"请稍后，检测正在进行中......")
         self.status = True
 
-        self.enter_marker = False
-        self.markers_sub = self.node.create_subscription(
-            topic='img_recognizer/markers',
-            msg_type=ImageMarkerArray,
-            callback=self.marker_callback,
-            qos_profile=rclpy.qos.qos_profile_system_default)
-        
+        self.enter_marker = True # Marker removed
         self.enter_annotation = False
         self.annotations_sub = self.node.create_subscription(
             topic='img_recognizer/annotations',

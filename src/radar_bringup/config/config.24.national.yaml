@@ -2,7 +2,7 @@
   ros__parameters:
     sample_lidar: 'lidar_mid70'
     # 初始化采样点云数目
-    init_sample: 1000000
+    init_sample: 500000
     # 对齐器采样模型点数
     mesh_sample: 1000000
     # 对齐器裁剪盒 单位: m
@@ -105,6 +105,7 @@
 /radar/hik_6mm/img_recognizer:
   ros__parameters:
     sync_queue_size: 20
+    sync_max_interval: 1.0
     crop_side_length: 2800.0
     img_compressed: False
     jigsaw_size: 3
@@ -134,3 +135,9 @@
   ros__parameters:
     enable_recorder: True
 
+
+/radar/lidar_mid70/livox_v1_lidar:
+  ros__parameters:
+    local_ip: '192.168.1.50'
+    dest_ip: '192.168.1.136'
+    udp_port: 50010
