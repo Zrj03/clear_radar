@@ -46,7 +46,8 @@ private:
     unsigned last_hl_num = 0;
     std::array<FULL_HIGHLIGHT_STATUS, 6> full_high_light;
 
-    team_color color = team_color::UNKNOWN;
+    // Default to C_RED to allow local testing without referee system connected
+    team_color color = team_color::C_RED;
     int64_t guessing_id = -1;
     int robot_num = 6;
 

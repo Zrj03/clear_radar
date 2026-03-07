@@ -1,4 +1,7 @@
 from launch import LaunchDescription, actions
+from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition
+from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 from tf2_geometry_msgs.tf2_geometry_msgs import _get_quat_from_mat, _build_affine, _decompose_affine
@@ -187,7 +190,34 @@ def get_pc_container():
 
 
 def generate_launch_description():
+    enable_judge_bridge = LaunchConfiguration('enable_judge_bridge')
+    enable_gimbal_serial = LaunchConfiguration('enable_gimbal_serial')
+
+    mvs_sdk_path = '/opt/MVS'
+    mvs_lib_path = os.path.join(mvs_sdk_path, 'lib', '64')
+    current_ld_library_path = os.environ.get('LD_LIBRARY_PATH', '')
+    combined_ld_library_path = (
+        f'{mvs_lib_path}:{current_ld_library_path}'
+        if current_ld_library_path else mvs_lib_path
+    )
+
     return LaunchDescription([
+        actions.SetEnvironmentVariable('MVCAM_SDK_PATH', mvs_sdk_path),
+        actions.SetEnvironmentVariable('MVCAM_COMMON_RUNENV', os.path.join(mvs_sdk_path, 'lib')),
+        actions.SetEnvironmentVariable('MVCAM_SOFTWARE_LIBENV', os.path.join(mvs_sdk_path, 'lib')),
+        actions.SetEnvironmentVariable('MVCAM_GENICAM_CLPROTOCOL', os.path.join(mvs_sdk_path, 'lib', 'CLProtocol')),
+        actions.SetEnvironmentVariable('ALLUSERSPROFILE', os.path.join(mvs_sdk_path, 'MVFG')),
+        actions.SetEnvironmentVariable('LD_LIBRARY_PATH', combined_ld_library_path),
+        DeclareLaunchArgument(
+            'enable_judge_bridge',
+            default_value='false',
+            description='Whether to launch judge_bridge (requires /dev/ttyUSB0)'
+        ),
+        DeclareLaunchArgument(
+            'enable_gimbal_serial',
+            default_value='false',
+            description='Whether to launch gimbal_serial (requires /dev/ttyACM0)'
+        ),
         # actions.ExecuteProcess(
         #     cmd=['ros2', 'bag', 'record',
         #          '--compression-mode', 'message',
@@ -209,19 +239,12 @@ def generate_launch_description():
             ], 'lidar_mid70_frame', 'hik_6mm_frame'
         ),
         *get_pc_container(),
-        get_matrix_tf_broadcaster(
-            np.array([[0.90805441,  0.00851127,  0.41876575,  0.05435923],
-                      [0.00681501, -0.9999614,  0.00554616, -0.01593622],
-                      [0.41879679, -0.00218231, -0.90807736, -0.07701991],
-                      [0.,  0.,  0.,  1.],]), 'map', 'lidar_mid70_frame'),
-
-        # world到map的TF树
+        # TF broadcast handled by pc_aligner during alignment
+        # Do not publish map->lidar_mid70_frame here to avoid TF loops
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
-            name='world_to_map',
-            namespace='radar',
-            arguments=['--x', '0', '--y', '0', '--z', '0', '--yaw', '0', '--pitch', '0', '--roll', '0', '--frame-id', 'world', '--child-frame-id', 'map']
+            arguments=['0', '0', '0', '0', '0', '0', '1', 'world', 'map']
         ),
 
         # 手动标定节点：调整下面的x, y, z和yaw(单位:弧度)使其与地图对齐
@@ -261,13 +284,13 @@ def generate_launch_description():
             parameters=[node_params,],
             output='both',
         ),
-        # Node(
-        #     package='target_multiplexer',
-        #     executable='target_multiplexer',
-        #     namespace='radar',
-        #     parameters=[node_params],
-        #     output='both',
-        # ),
+        Node(
+            package='target_multiplexer',
+            executable='target_multiplexer',
+            namespace='radar',
+            parameters=[node_params],
+            output='both',
+        ),
         Node(
             package='dv_trigger',
             executable='dv_trigger',
@@ -287,6 +310,7 @@ def generate_launch_description():
             executable='judge_bridge',
             name='judge_bridge',
             namespace='radar',
+            condition=IfCondition(enable_judge_bridge),
             parameters=[node_params],
             output='both',
         ),
@@ -294,12 +318,12 @@ def generate_launch_description():
             package='foxglove_bridge',
             executable='foxglove_bridge',
         ),
-        # Node(
-        #     package='target_visualizer',
-        #     executable='target_visualizer',
-        #     namespace='radar',
-        #     output='both',
-        # ),
+        Node(
+            package='target_visualizer',
+            executable='target_visualizer',
+            namespace='radar',
+            output='both',
+        ),
         Node(
             package='result_visualizer',
             executable='result_visualizer',
@@ -311,6 +335,7 @@ def generate_launch_description():
             package='serial_node',
             executable='gimbal_serial',
             name='gimbal_serial',
+            condition=IfCondition(enable_gimbal_serial),
             output='both',
             parameters=[
                 {'port': '/dev/ttyACM0'},

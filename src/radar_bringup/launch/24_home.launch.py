@@ -172,7 +172,7 @@ def get_pc_container():
 def generate_launch_description():
     return LaunchDescription([
         *get_vision_container(
-            'hik_6mm', 'J87631625', 'package://hik_camera/config/6mm.yaml'),
+            'hik_6mm', 'DA8184809', 'package://hik_camera/config/6mm.yaml'),
         get_xyzw_tf_broadcaster(
             [
                 -0.011371053755283356,

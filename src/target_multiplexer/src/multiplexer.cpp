@@ -188,6 +188,13 @@ redo:
     //     last_pub_id[send_idx] = encode_idx(guess_idx);
     //     RCLCPP_DEBUG(get_logger(), "Blind guessing for %d: %lu", send_idx, guess_idx);
     // }
+    } else if (!last_detected.targets.empty()) {
+        // 离线兜底：无裁判系统反馈时，直接用最近一次检测结果维持地图输出
+        const auto& target = last_detected.targets.front();
+        msg.target_position_x = static_cast<float>(target.position[0]);
+        msg.target_position_y = static_cast<float>(target.position[1]);
+        last_pub_id[send_idx] = static_cast<int64_t>(target.id);
+        stop_iter = true;
     } else {
         NEXT
     }

@@ -18,7 +18,7 @@
     startup_manual_align: True
 
     manual_crop.min: [0., -5., -5.]
-    manual_crop.max: [10., 5., 5.]
+    manual_crop.max: [10., 5., 5.] 
 
     align_model: "mesh"
     mesh: "home_demo.stl"
@@ -27,7 +27,7 @@
 /radar/pc_detector:
   ros__parameters:
     # 缓冲区帧数（时间累计）
-    node.buffer_frame_size: 30
+    node.buffer_frame_size: 10
     node.lidars: ['lidar_mid70']
 
     mesh.filter_mode: "mesh"

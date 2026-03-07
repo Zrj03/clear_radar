@@ -98,7 +98,7 @@
 
 /radar/hik_6mm/hik_camera:
   ros__parameters:
-    sn: J87631625
+    sn: DA8184809
     camera_info_url: "package://hik_camera/config/6mm.yaml"
     frame_rate: 30.0
 
@@ -112,6 +112,12 @@
     img_size: 640
     armor_detector_config: "models/v5.1_R803G.toml"
     enable_imshow: True
+
+/radar/nn_detector:
+  ros__parameters:
+    armor_detector_config: "models/v5.1_R803G.toml"
+    enable_imshow: false
+    debug: false
 
 /radar/matcher:
   ros__parameters:
