@@ -4,16 +4,35 @@
 
 #ifdef VINO_FALLBACK
 #include <detector/detector_vino.h>
+#include <filesystem>
+
+namespace {
+
+std::string resolve_model_path(const toml::value &config, const std::string &share_dir,
+                               const std::string &key, const std::string &fallback_path) {
+    std::string model_path = fallback_path;
+    if (config.contains(key)) {
+        model_path = config.at(key).as_string();
+    }
+
+    std::filesystem::path path(model_path);
+    if (path.is_absolute()) {
+        return path.string();
+    }
+    return (std::filesystem::path(share_dir) / path).string();
+}
+
+}  // namespace
 
 DetectorVINO::DetectorVINO(const std::string &config_file, const std::string &share_dir,
                            const rclcpp::Logger &_logger)
     : NetDetector(config_file, share_dir, _logger) {
-    std::string model_xml = model_prefix + ".xml";
-    std::string model_bin = model_prefix + ".bin";
-    RCLCPP_INFO(logger, "[VINO] loading model: %s", model_bin.c_str());
+    std::string model_onnx = resolve_model_path(config, share_dir, "model_onnx",
+                                                std::string(config.at("model_prefix").as_string()) + ".onnx");
+    RCLCPP_INFO(logger, "[VINO] loading onnx model: %s", model_onnx.c_str());
 
     core.set_property(ov::cache_dir(share_dir + "/net_cache"));
-    std::shared_ptr<ov::Model> model = core.read_model(model_xml, model_bin);
+    std::shared_ptr<ov::Model> model = core.read_model(model_onnx);
     compiled_model = core.compile_model(model, "GPU");
 
     layer_num = model->get_output_size();

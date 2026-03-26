@@ -12,8 +12,11 @@
     max_corr_dist: 0.5
     # 最大迭代次数
     max_iteration: 20
+    quality_gate.enable: True
+    quality_gate.max_rmse: 0.24
+    quality_gate.min_fitness: 0.80
     # 启用预选择点
-    use_preselect: True
+    use_preselect: False
     # 启动时手动对齐
     startup_manual_align: True
 
@@ -28,7 +31,7 @@
 /radar/pc_detector:
   ros__parameters:
     # 缓冲区帧数
-    node.buffer_frame_size: 12
+    node.buffer_frame_size: 3
     node.lidars: ['lidar_mid70']
 
     mesh.mesh_ori: "24_bg2align_fix1.stl"
@@ -42,54 +45,66 @@
     # 体素网格盒大小 单位: m
     voxel_grid.size.min: [0.150, 0.150, 0.]
     voxel_grid.size.max: [27.850, 14.850, 1.500]
-    # 场地模型占用扩展大小 单位: m
-    voxel_grid.occupy_expand: 0.3
+    # 场地模型占用扩展大小 单位: m（适当加大，过滤边界区域漏出的背景点）
+    voxel_grid.occupy_expand: 0.38
 
-    # 跟踪延迟长度 单位: 帧
-    target_map.last_frames: 120
+    # 跟踪延迟长度 单位: 帧（4秒，原12秒，缩短幽灵轨迹存活窗口）
+    target_map.last_frames: 40
     # 跟踪 (马氏) 距离阈值
-    target_map.dist_thres: 6.0
+    target_map.dist_thres: 4.0
     # # 跟踪合并跟丢阈值 单位: 帧
     # target_map.combine_limit: 15
     # # 跟踪合并 (马氏) 距离阈值
     # target_map.combine_dist: 8.0
-    # 强制合并距离阈值 单位: m
-    target_map.force_combine_dist: 0.5
+    # 强制合并距离阈值 单位: m（同一车体前后形成两个轨迹时强制合并，≈车长）
+    target_map.force_combine_dist: 1.0
     # 错误合并判定跟丢阈值 单位: 帧
     target_map.separate_limit: 8
     # 跟踪框相接阈值 单位: m
     target_map.cc_thres: 0.05
     # 初始跟踪框预设丢失帧计数 单位: 帧
-    target_map.init_lost: 20
+    target_map.init_lost: 14
+    # 新目标最少点数，抑制点云碎片直接成目标
+    target_map.min_new_target_points: 55
+    # 新目标几何尺寸下限（过滤无法构成整车的碎片簇）
+    target_map.min_new_target_size_x: 0.25
+    target_map.min_new_target_size_y: 0.20
+    target_map.min_new_target_area: 0.06
+    # 新目标最少连续确认帧数，降低短命 ID 抖动
+    target_map.min_new_target_confirmations: 7
+    # 新目标候选允许丢帧间隔（严格：仅允许1帧缺失）
+    target_map.new_target_confirm_max_gap: 1
+    # 新目标候选聚合距离
+    target_map.new_target_candidate_dist: 0.6
     # 投影后 Z 轴高度 单位: m
     target_map.project_z: 0.2
 
     # Z 方向压缩比例
     clustering.z_zip: 0.2
-    # (普通参数) DBSCAN 聚类算法的聚类半径 单位: m
-    clustering.normal.eps: 0.3
+    # (普通参数) DBSCAN 聚类算法的聚类半径 单位: m（加大到0.45保证整车点云聚为一簇）
+    clustering.normal.eps: 0.45
     # (普通参数) DBSCAN 聚类算法的最少点阈值
-    clustering.normal.min_points: 8
+    clustering.normal.min_points: 12
     # (宽松参数) DBSCAN 聚类算法的聚类半径 单位: m
     clustering.loose.eps: 0.4
     # (宽松参数) DBSCAN 聚类算法的最少点阈值
-    clustering.loose.min_points: 6
+    clustering.loose.min_points: 10
     # (宽松参数) 进行宽松聚类的扩展边界 单位: m
     clustering.loose.box_expand: 0.2
     # (严格参数) DBSCAN 聚类算法的聚类半径 单位: m
     clustering.strict.eps: 0.15
     # (严格参数) DBSCAN 聚类算法的最少点阈值
-    clustering.strict.min_points: 12
+    clustering.strict.min_points: 14
 
-    # 预测协方差矩阵
-    kalman_filter.q.position: 1.0e-7
-    kalman_filter.q.velocity: 5.0e-6
-    kalman_filter.q.pos_vel: 5.0e-6
-    # 观测协方差矩阵
-    kalman_filter.r.position: 5.0e-2
-    kalman_filter.r.velocity: 5.0e-2
+    # 预测协方差矩阵（减少位置滞后，同时避免速度过抖）
+    kalman_filter.q.position: 8.0e-3
+    kalman_filter.q.velocity: 1.5e-4
+    kalman_filter.q.pos_vel: 2.0e-4
+    # 观测协方差矩阵（位置和速度观测都更可信）
+    kalman_filter.r.position: 1.8e-2
+    kalman_filter.r.velocity: 2.5e-2
     # 预测积累协方差更新比率
-    kalman_filter.cov_factor: 2.5
+    kalman_filter.cov_factor: 2.0
     # 速度衰减比率
     kalman_filter.decay_rate: 1.0e-4
     # 速递限制 单位: m/s
@@ -100,23 +115,27 @@
   ros__parameters:
     sn: DA8184809
     camera_info_url: "package://hik_camera/config/6mm.yaml"
+    exposure_time: 4000.0
+    gain: 15.0
+    digital_shift: 0.0
     frame_rate: 30.0
+    use_sensor_data_qos: false
 
 /radar/hik_6mm/img_recognizer:
   ros__parameters:
-    sync_queue_size: 20
-    sync_max_interval: 1.0
-    crop_side_length: 2800.0
+    sync_queue_size: 12
+    sync_max_interval: 0.13
+    crop_side_length: 2400.0
     img_compressed: False
     jigsaw_size: 3
-    img_size: 640
-    armor_detector_config: "models/v5.1_R803G.toml"
+    img_size: 384
+    armor_detector_config: "models/armor_detr.toml"
     enable_imshow: True
 
 /radar/nn_detector:
   ros__parameters:
-    armor_detector_config: "models/v5.1_R803G.toml"
-    enable_imshow: false
+    armor_detector_config: "models/armor_detr.toml"
+    enable_imshow: true
     debug: false
 
 /radar/matcher:
@@ -124,18 +143,36 @@
     img_ns: ['/radar/hik_6mm']
     value_max: 10000
     value_inc: 40
-    value_dec: 10
-    value_fail_dec: 1
-    value_match_limit: 100
+    value_dec: 6
+    value_fail_dec: 0
+    value_match_limit: 30
     fail_dec_min: 100
     feedback_inc: 1000
     feedback_dec: 500
-    pos_reinforce_inc: 5
+    pos_reinforce_inc: 10
     pos_reinforce_max: 120
     pos_reinforce_timeout: 200
-    pub_timeout: 200
+    pub_timeout: 100
     vis_per_pub: 1
-    uncertainty_limit: 40
+    uncertainty_limit: 80
+    require_recent_visual: false
+    visual_confirm_timeout_ms: 1500
+    min_visual_confirmations: 1
+    assignment_hold_ms: 1200
+    infantry_assignment_stickiness_bonus: 350
+    infantry_dominance_lock_margin: 800
+    slot_switch_guard_ms: 600
+    slot_switch_confirmations: 2
+    slot_switch_score_margin: 300
+    same_color_min_separation: 0.8
+
+/radar/multiplexer:
+  ros__parameters:
+    default_team_color: red
+    match_send_interval: 30
+    detected_hold_sec: 1.0
+    hold_guard_dist: 0.8
+    double_send_thres: 80
 
 /radar/judge_bridge:
   ros__parameters:

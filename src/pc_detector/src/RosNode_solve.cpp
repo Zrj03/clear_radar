@@ -32,6 +32,13 @@ void DetectorNode::update_parameters()
         static_cast<size_t>(get_parameter("target_map.separate_limit").as_int()),
         get_parameter("target_map.cc_thres").as_double(),
         static_cast<size_t>(get_parameter("target_map.init_lost").as_int()),
+        static_cast<size_t>(get_parameter("target_map.min_new_target_points").as_int()),
+        get_parameter("target_map.min_new_target_size_x").as_double(),
+        get_parameter("target_map.min_new_target_size_y").as_double(),
+        get_parameter("target_map.min_new_target_area").as_double(),
+        static_cast<size_t>(get_parameter("target_map.min_new_target_confirmations").as_int()),
+        static_cast<size_t>(get_parameter("target_map.new_target_confirm_max_gap").as_int()),
+        get_parameter("target_map.new_target_candidate_dist").as_double(),
         get_parameter("clustering.z_zip").as_double(),
         get_parameter("clustering.loose.box_expand").as_double(),
         { get_parameter("clustering.normal.eps").as_double(),
@@ -84,6 +91,23 @@ void DetectorNode::pc_recv_callback(const sensor_msgs::msg::PointCloud2& msg, co
 {
     if (!radar_interface::check_lidar_msg(msg))
         return;
+
+    try {
+        const auto tf_msg = tf_buffer->lookupTransform("world", l_ctx->tf_frame, tf2::TimePointZero, tf2::durationFromSec(0.01));
+        const auto new_trans = tf2::transformToEigen(tf_msg);
+        const double trans_delta = (new_trans.translation() - l_ctx->trans.translation()).norm();
+        const double rot_delta = Eigen::Quaterniond(new_trans.rotation()).angularDistance(Eigen::Quaterniond(l_ctx->trans.rotation()));
+        if (trans_delta > 1e-3 || rot_delta > 1e-4) {
+            l_ctx->trans = new_trans;
+            prepare_voxel_grid(*l_ctx);
+            RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                "Updated TF for %s (d_trans=%.4f, d_rot=%.4f)", l_ctx->tf_frame.c_str(), trans_delta, rot_delta);
+        }
+    } catch (const tf2::TransformException& e) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+            "Transform refresh failed for %s: %s", l_ctx->tf_frame.c_str(), e.what());
+    }
+
     UnpackedPcMsg unpacked;
     unpacked.timestamp = msg.header.stamp;
     unpacked.points.reserve(msg.height * msg.width);

@@ -21,6 +21,9 @@ AlignerNode::AlignerNode() : Node("pc_aligner")
     declare_parameter("crop_box.max", std::vector<double> { 27.850, 14.850, 1.500 });
     declare_parameter("max_corr_dist", 5.);
     declare_parameter("max_iteration", 30);
+    declare_parameter("quality_gate.enable", true);
+    declare_parameter("quality_gate.max_rmse", 0.24);
+    declare_parameter("quality_gate.min_fitness", 0.80);
 
     declare_parameter("use_preselect", false);
     declare_parameter("preselect_pcd", "preselect.pcd");
@@ -32,6 +35,8 @@ AlignerNode::AlignerNode() : Node("pc_aligner")
 
     declare_parameter("manual_crop.min", std::vector<double> { 0, -15., -15. });
     declare_parameter("manual_crop.max", std::vector<double> { 25., 15., 15. });
+    declare_parameter("manual_align.auto_retry_on_fail", false);
+    declare_parameter("manual_align.max_retries", 0);
 
     declare_parameter("tf_pub_interval_ms", 1000);
     // x, y, z, qw, qx, qy, qz
@@ -47,6 +52,17 @@ AlignerNode::AlignerNode() : Node("pc_aligner")
     middle_tf->transform.rotation.x = init_trans[4];
     middle_tf->transform.rotation.y = init_trans[5];
     middle_tf->transform.rotation.z = init_trans[6];
+
+    world_tf = std::make_shared<geometry_msgs::msg::TransformStamped>();
+    world_tf->header.frame_id = "middle";
+    world_tf->child_frame_id = "world";
+    world_tf->transform.translation.x = 0.0;
+    world_tf->transform.translation.y = 0.0;
+    world_tf->transform.translation.z = 0.0;
+    world_tf->transform.rotation.w = 1.0;
+    world_tf->transform.rotation.x = 0.0;
+    world_tf->transform.rotation.y = 0.0;
+    world_tf->transform.rotation.z = 0.0;
 
     tf_buffer = std::make_shared<tf2_ros::Buffer>(get_clock());
     tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer);

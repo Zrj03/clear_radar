@@ -10,12 +10,18 @@ constexpr float square(float a, float b) { return a * a + b * b; }
 void MatcherNode::pos_reinforce_timer_callback()
 {
     for (const auto& tg : last_targets.targets) {
+        auto confirmed_it = target_last_visual_confirmed.find(tg.id);
+        if (confirmed_it == target_last_visual_confirmed.end())
+            continue;
+        const auto timeout_ms = get_parameter("visual_confirm_timeout_ms").as_int();
+        if ((this->now() - confirmed_it->second).nanoseconds() > static_cast<int64_t>(timeout_ms) * 1000000ll)
+            continue;
         int reinforce_idx = pos_reinforce(tg.position[0], tg.position[1]);
         if (reinforce_idx == -1)
             continue;
         auto mapped = targets_value_map.find(tg.id);
         if (mapped != targets_value_map.end()) {
-            RCLCPP_DEBUG(get_logger(), "Pos Reinforce tgid: %ld, idx: %d", mapped->first, reinforce_idx);
+            RCLCPP_DEBUG(get_logger(), "Pos Reinforce tgid: %ld, reinforce_idx: %d (color=%d, type=%d), pos: (%.2f, %.2f)", mapped->first, reinforce_idx, get_color(reinforce_idx), get_type(reinforce_idx), tg.position[0], tg.position[1]);
             auto& value = mapped->second;
             long pos_reinforce_max = get_parameter("pos_reinforce_max").as_int();
             if (value[reinforce_idx] < pos_reinforce_max)

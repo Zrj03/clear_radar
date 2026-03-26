@@ -207,6 +207,147 @@ void YOLOv5_1_Decoder::decode(int layer_index, const float *prob, std::vector<Ar
     return;
 }
 
+DETRDecoder::DETRDecoder(toml::value &config, const rclcpp::Logger &_logger)
+    : NetDecoderBase(config, _logger) {
+    try {
+        min_class_score = static_cast<float>(config.at("DETR_MIN_CLASS_SCORE").as_floating());
+    } catch (...) {
+        min_class_score = 0.0f;
+    }
+    try {
+        min_color_score = static_cast<float>(config.at("DETR_MIN_COLOR_SCORE").as_floating());
+    } catch (...) {
+        min_color_score = 0.0f;
+    }
+    try {
+        class_margin = static_cast<float>(config.at("DETR_CLASS_MARGIN").as_floating());
+    } catch (...) {
+        class_margin = 0.0f;
+    }
+    try {
+        color_margin = static_cast<float>(config.at("DETR_COLOR_MARGIN").as_floating());
+    } catch (...) {
+        color_margin = 0.0f;
+    }
+}
+
+void DETRDecoder::set_layer_info(int layer_index, const std::vector<size_t> &dims) {
+    assert((int)layers.size() == layer_index && "set_layer_info should be called in order");
+    assert(dims.size() == 3 && "DETR model output should be 3-dim [batch, queries, outputs]");
+
+    DETRLayerInfo layer = {
+        layer_index,
+        static_cast<int>(dims[1]),  // num_queries
+        static_cast<int>(dims[2]),  // num_outputs per query
+    };
+    RCLCPP_INFO(logger, "[DETR] layer %d: num_queries=%d, num_outputs=%d",
+                layer_index, layer.num_queries, layer.num_outputs);
+    assert(check_num_outputs(layer.num_outputs) && "DETR num_output check failed");
+    layers.push_back(layer);
+}
+
+bool DETRDecoder::check_num_outputs(int num_outputs) {
+    return num_outputs == 4 + NUM_CLASSES + NUM_COLORS;
+}
+
+void DETRDecoder::decode(int layer_index, const float *prob, std::vector<Armor> &objects) {
+    assert((int)layers.size() > layer_index && "layer_index out of range");
+    const auto &layer = layers[layer_index];
+    const int no = layer.num_outputs;
+    const int nq = layer.num_queries;
+
+    for (int q = 0; q < nq; ++q) {
+        const float *row = prob + q * no;
+        // bbox: cx, cy, w, h (normalized 0-1 after sigmoid)
+        float cx = row[0] * INPUT_W;
+        float cy = row[1] * INPUT_H;
+        float bw  = row[2] * INPUT_W;
+        float bh  = row[3] * INPUT_H;
+
+        // class and color scores (already sigmoid)
+        const float *cls_scores = row + 4;
+        const float *col_scores = row + 4 + NUM_CLASSES;
+
+        int cls_id = 0;
+        int cls_second_id = 0;
+        float cls_best = cls_scores[0];
+        float cls_second = -1.0f;
+        for (int idx = 1; idx < NUM_CLASSES; ++idx) {
+            if (cls_scores[idx] > cls_best) {
+                cls_second = cls_best;
+                cls_second_id = cls_id;
+                cls_best = cls_scores[idx];
+                cls_id = idx;
+            } else if (cls_scores[idx] > cls_second) {
+                cls_second = cls_scores[idx];
+                cls_second_id = idx;
+            }
+        }
+
+        int col_id = 0;
+        int col_second_id = 0;
+        float col_best = col_scores[0];
+        float col_second = -1.0f;
+        for (int idx = 1; idx < NUM_COLORS; ++idx) {
+            if (col_scores[idx] > col_best) {
+                col_second = col_best;
+                col_second_id = col_id;
+                col_best = col_scores[idx];
+                col_id = idx;
+            } else if (col_scores[idx] > col_second) {
+                col_second = col_scores[idx];
+                col_second_id = idx;
+            }
+        }
+
+        if (cls_best < min_class_score)
+            continue;
+        if (col_best < min_color_score)
+            continue;
+        if (cls_second_id != cls_id && cls_best - cls_second < class_margin)
+            continue;
+        if (col_second_id != col_id && col_best - col_second < color_margin)
+            continue;
+
+        // Use geometric mean to avoid over-penalizing class/color joint confidence.
+        float final_conf = std::sqrt(std::max(0.0f, cls_best * col_best));
+        if (final_conf <= BBOX_CONF_THRESH)
+            continue;
+
+        // Matcher only consumes type [0..5]. Skip other classes (0/Bs/Bb-like) here.
+        if (cls_id > 5)
+            continue;
+
+        // Matcher only consumes BLUE/RED colors. Skip N/P-like classes here.
+        if (col_id > 1)
+            continue;
+
+        Armor now;
+        float x0 = cx - bw * 0.5f;
+        float y0 = cy - bh * 0.5f;
+        float x1 = cx + bw * 0.5f;
+        float y1 = cy + bh * 0.5f;
+        x0 = std::max(0.0f, std::min(x0, static_cast<float>(INPUT_W - 1)));
+        y0 = std::max(0.0f, std::min(y0, static_cast<float>(INPUT_H - 1)));
+        x1 = std::max(0.0f, std::min(x1, static_cast<float>(INPUT_W - 1)));
+        y1 = std::max(0.0f, std::min(y1, static_cast<float>(INPUT_H - 1)));
+        if (x1 <= x0 || y1 <= y0)
+            continue;
+        now.rect  = cv::Rect(x0, y0, x1 - x0, y1 - y0);
+        now.conf  = final_conf;
+        now.color = col_id;
+        now.type  = cls_id;
+        now.size  = 0;
+        // derive 4 corner pts + center (pts[4])
+        now.pts[0] = cv::Point2f(x0, y0);
+        now.pts[1] = cv::Point2f(x1, y0);
+        now.pts[2] = cv::Point2f(x1, y1);
+        now.pts[3] = cv::Point2f(x0, y1);
+        now.pts[4] = cv::Point2f(cx, cy);
+        objects.push_back(now);
+    }
+}
+
 YOLOv8Decoder::YOLOv8Decoder(toml::value &config, const rclcpp::Logger& _logger) : NetDecoderBase(config, _logger) {
     NUM_KPTS = config.at("NUM_KPTS").as_integer();
     NUM_TSIZES = config.at("NUM_TSIZES").as_integer();

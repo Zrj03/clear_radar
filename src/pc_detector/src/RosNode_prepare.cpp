@@ -35,6 +35,7 @@ void DetectorNode::prepare_lidars()
         std::string tf_name = lidar_name + "_frame";
         std::string topic_name = lidar_name + "/pc_raw";
         auto l_ctx = std::make_shared<LidarContext>();
+        l_ctx->tf_frame = tf_name;
 
         // 获取世界变换
         while (true) {
@@ -157,13 +158,20 @@ void DetectorNode::prepare_detector()
         { "combine_limit", 15 },
         { "separate_limit", 8 },
         { "init_lost", 12 },
+        { "min_new_target_points", 12 },
+        { "min_new_target_confirmations", 2 },
+        { "new_target_confirm_max_gap", 2 },
     });
     declare_parameters("target_map", std::map<std::string, double> {
         { "dist_thres", 20.0 },
         { "combine_dist", 8.0 },
         { "force_combine_dist", 0.1 },
         { "cc_thres", 0.05 },
-        { "project_z", 0.3 }
+        { "project_z", 0.3 },
+        { "min_new_target_size_x", 0.10 },
+        { "min_new_target_size_y", 0.08 },
+        { "min_new_target_area", 0.012 },
+        { "new_target_candidate_dist", 0.50 },
     });
     declare_parameters("clustering", std::map<std::string, int> {
         { "normal.min_points", 8 },

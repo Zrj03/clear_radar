@@ -26,14 +26,14 @@ class ImgRecognizer:
         self.enter_marker = True # Marker removed
         self.enter_annotation = False
         self.annotations_sub = self.node.create_subscription(
-            topic='img_recognizer/annotations',
+            topic='hik_6mm/img_recognizer/annotations',
             msg_type=ImageAnnotations,
             callback=self.annotations_callback,
             qos_profile=rclpy.qos.qos_profile_system_default)
         
         self.enter_detection = False
         self.detected_targets_sub = self.node.create_subscription(
-            topic='img_recognizer/detected_targets',
+            topic='hik_6mm/img_recognizer/detected_targets',
             msg_type=DetectedTargetArray,
             callback=self.detection_callback,
             qos_profile=rclpy.qos.qos_profile_system_default)
@@ -55,7 +55,7 @@ class ImgRecognizer:
             return
         else:
             self.status = False
-            self.button_.set_text(f'Failed: img_recognizer/annotations 没有消息')
+            self.button_.set_text(f'Failed: hik_6mm/img_recognizer/annotations 没有消息')
 
     def detection_callback(self, msg) -> None:
         self.enter_detection = True
@@ -63,7 +63,7 @@ class ImgRecognizer:
             return
         else:
             self.status = False
-            self.button_.set_text(f'Failed: img_recognizer/detected_targets 没有消息')
+            self.button_.set_text(f'Failed: hik_6mm/img_recognizer/detected_targets 没有消息')
 
     async def wait_for_result(self) -> None:
         await asyncio.sleep(10)

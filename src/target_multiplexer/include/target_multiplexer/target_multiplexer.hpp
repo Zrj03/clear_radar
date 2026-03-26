@@ -24,6 +24,12 @@ enum class FULL_HIGHLIGHT_STATUS {
 
 class MultiplexerNode : public rclcpp::Node {
 private:
+    struct HeldMapTarget {
+        radar_interface::msg::MapRobotData msg;
+        rclcpp::Time stamp;
+        bool valid = false;
+    };
+
     rclcpp::Subscription<radar_interface::msg::MatchResult>::SharedPtr match_result_sub;
     rclcpp::Subscription<radar_interface::msg::TargetArray>::SharedPtr detected_sub;
     rclcpp::Subscription<radar_interface::msg::RadarMarkData>::SharedPtr radar_mark_sub;
@@ -38,25 +44,21 @@ private:
     radar_interface::msg::TargetArray last_detected;
     radar_interface::msg::RadarMarkData last_mark;
 
-    // id : lasting_time
-    std::map<int64_t, size_t> banned_targets;
     std::array<int64_t, 6> last_pub_id;
+    std::array<HeldMapTarget, 6> held_map_targets;
     // std::array<std::vector<std::pair<float, f-loat>>, 6> blind_guess;
     // std::array<bool, 6> keep_guess;
-    unsigned last_hl_num = 0;
     std::array<FULL_HIGHLIGHT_STATUS, 6> full_high_light;
 
     // Default to C_RED to allow local testing without referee system connected
     team_color color = team_color::C_RED;
-    int64_t guessing_id = -1;
     int robot_num = 6;
 
     void radar_mark_callback(const radar_interface::msg::RadarMarkData& msg);
     void team_color_callback(const radar_interface::team_color::msg& msg);
+    bool has_nearby_detection(const radar_interface::msg::MapRobotData& held_msg, double dist_sqr_threshold) const;
 
     void multiplexer();
-    void update_banned();
-    void update_guessing();
 
     // void load_blind_guess();
 

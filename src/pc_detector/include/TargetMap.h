@@ -43,6 +43,13 @@ public:
         size_t separate_limit;
         double cc_thres;
         size_t init_lost;
+        size_t min_new_target_points;
+        double min_new_target_size_x;
+        double min_new_target_size_y;
+        double min_new_target_area;
+        size_t min_new_target_confirmations;
+        size_t new_target_confirm_max_gap;
+        double new_target_candidate_dist;
         double z_zip;
         double loose_expand;
         struct {
@@ -51,11 +58,24 @@ public:
         } normal, loose, strict;
     };
 
+    struct PendingCandidate {
+        BoundingBox aabb;
+        size_t pt_num;
+        Eigen::Vector3d grav;
+        size_t hits;
+        size_t last_seen_frame;
+    };
+
 private:
     size_t inc_id = 0; // 自增 id
+    size_t frame_seq = 0;
+    size_t pending_inc_id = 0;
     TargetMapParams params;
+    std::unordered_map<size_t, PendingCandidate> pending_candidates;
     std::function<Eigen::Vector3d(const Eigen::Vector3d&)> project_func;
     void element_update(size_t key, const BoundingBox& aabb, size_t pt_num, Eigen::Vector3d grav);
+    bool pass_new_target_hard_gate(const BoundingBox& aabb, size_t pt_num) const;
+    size_t try_new_target_with_confirmation(const BoundingBox& aabb, size_t pt_num, Eigen::Vector3d grav);
     void pre_update();
     void post_update();
     size_t new_target(const BoundingBox& aabb, size_t pt_num, Eigen::Vector3d grav);

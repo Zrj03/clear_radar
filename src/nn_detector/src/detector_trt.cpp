@@ -8,6 +8,25 @@
 #include <ios>
 #include <memory>
 #include <sstream>
+#include <filesystem>
+
+namespace {
+
+std::string resolve_model_path(const toml::value &config, const std::string &share_dir,
+                               const std::string &key, const std::string &fallback_path) {
+    std::string model_path = fallback_path;
+    if (config.contains(key)) {
+        model_path = config.at(key).as_string();
+    }
+
+    std::filesystem::path path(model_path);
+    if (path.is_absolute()) {
+        return path.string();
+    }
+    return (std::filesystem::path(share_dir) / path).string();
+}
+
+}  // namespace
 
 #ifndef CUDA_CHECK
 #define CUDA_CHECK(callstr)                                                                   \
@@ -42,8 +61,10 @@ void DetectorTRT::TrtLogger::log(nvinfer1::ILogger::Severity severity, const cha
 DetectorTRT::DetectorTRT(const std::string &config_file, const std::string &share_dir,
                          const rclcpp::Logger &_logger, CUcontext *ctx)
     : NetDetector(config_file, share_dir, _logger), trt_logger(_logger), cuda_ctx(ctx) {
-    std::string model_onnx = model_prefix + ".onnx";
-    std::string model_cache = model_prefix + ".engine";
+    std::string model_onnx = resolve_model_path(config, share_dir, "model_onnx",
+                                                std::string(config.at("model_prefix").as_string()) + ".onnx");
+    std::string model_cache = resolve_model_path(config, share_dir, "model_trt",
+                                                 std::string(config.at("model_prefix").as_string()) + ".engine");
 
     RCLCPP_INFO(logger, "[TRT] loading engine/cache: %s", model_cache.c_str());
     runtime = std::shared_ptr<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(trt_logger));

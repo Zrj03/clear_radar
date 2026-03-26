@@ -1,4 +1,5 @@
 import os
+from array import array
 import rclpy
 import rclpy.qos
 import numpy as np
@@ -27,7 +28,7 @@ configs = {
 
 class ResultVisualizer(Node):
     team_color = True    # False: Blue, True: Red
-    mark = [0., 0., 0., 0., 0.,]
+    mark = [0., 0., 0., 0., 0., 0.]
 
     def __init__(self):
         super().__init__('result_visualizer')
@@ -88,16 +89,18 @@ class ResultVisualizer(Node):
                 im_y = int(
                     (1 - target.position[1] / configs['real_height']) * self.ori_img.shape[0])
                 color = (0, 0, 255) if is_red else (255, 0, 0)
-                # 我方和敌方都使用我方/敌方颜色的实心圆圈 + 编号
+                # 我方和敌方都使用对应颜色的实心圆圈
                 cv2.circle(now_img, (im_x, im_y), 20, color, -1)
-                cv2.putText(now_img, str(num), (im_x - 10, im_y + 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                if is_red and not self.team_color:
-                    cv2.putText(now_img, f"{self.mark[num]}/120", (im_x - 20, im_y + 40),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                if not is_red and self.team_color:
-                    cv2.putText(now_img, f"{self.mark[num]}/120", (im_x - 20, im_y + 40),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                # 只有非0号才显示
+                if num != 0:
+                    cv2.putText(now_img, str(num), (im_x - 10, im_y + 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    if is_red and not self.team_color and num < len(self.mark):
+                        cv2.putText(now_img, f"{self.mark[num]}/120", (im_x - 20, im_y + 40),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                    if not is_red and self.team_color and num < len(self.mark):
+                        cv2.putText(now_img, f"{self.mark[num]}/120", (im_x - 20, im_y + 40),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
             except IndexError as e:
                 self.get_logger().error(f"Error in drawing: {e}")
 
@@ -115,13 +118,9 @@ class ResultVisualizer(Node):
             for i, target in enumerate(enemy_targets):
                 draw(enemy_red, i, target, False)
 
-        img = Image()
-        img.height = now_img.shape[0]
-        img.width = now_img.shape[1]
-        img.encoding = 'bgr8'
-        img.is_bigendian = False
-        img.step = now_img.shape[1] * 3
-        img.data = now_img.tobytes()
+        from cv_bridge import CvBridge
+        bridge = CvBridge()
+        img = bridge.cv2_to_imgmsg(now_img, encoding="bgr8")
         self.img_pub.publish(img)
         if self.get_parameter('im_show').value:
             cv2.namedWindow('result', cv2.WINDOW_NORMAL)

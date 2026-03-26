@@ -34,6 +34,7 @@ struct UnpackedPcMsg {
 
 struct LidarContext {
     using SharedPtr = std::shared_ptr<LidarContext>;
+    std::string tf_frame;
     Eigen::Isometry3d trans;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subscriber;
     VoxelGrid voxel_grid;

@@ -51,6 +51,8 @@ NetDetector::NetDetector(const std::string& config_file, const std::string& shar
         this->decoder = std::make_shared<YOLOv5_1_Decoder>(config, logger);
     } else if (type == "V5") {
         this->decoder = std::make_shared<YOLOv5Decoder>(config, logger);
+    } else if (type == "DETR") {
+        this->decoder = std::make_shared<DETRDecoder>(config, logger);
     } else {
         RCLCPP_ERROR(logger, "Invalid type for NetDecoder: %s", type.c_str());
         rclcpp::shutdown();

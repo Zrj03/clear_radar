@@ -2,6 +2,8 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <filesystem>
 #include <toml.hpp>
+#include <algorithm>
+#include <cctype>
 
 // 由于裁判系统反馈是 1Hz ，如果要猜测一个目标，应该要在 1s 内发送 2 次以上的坐标，所以应该要记住每次发送的
 
@@ -10,21 +12,30 @@ using namespace target_multiplexer;
 MultiplexerNode::MultiplexerNode()
     : rclcpp::Node("multiplexer")
 {
+    
+
     for (int i = 0; i < 6; ++i) {
         last_match_result.red[i].id = -1;
         last_match_result.blue[i].id = -1;
         last_mark.mark_progress[i] = 0;
         last_pub_id[i] = -1;
         // keep_guess[i] = false;
-        full_high_light[i] = FULL_HIGHLIGHT_STATUS::HIGHLIGHT;
+        // Without judge feedback, default to NONE to avoid skipping all slots.
+        full_high_light[i] = FULL_HIGHLIGHT_STATUS::NONE;
     }
     // load_blind_guess();
 
     declare_parameter("double_send_thres", 100);
-    declare_parameter("ban_time", 10);
-    declare_parameter("guess_time", 4);
-    declare_parameter("guess_hl_num", 3);
-    declare_parameter("half_thres", 1.0);
+    declare_parameter("detected_hold_sec", 1.5);
+    declare_parameter("hold_guard_dist", 1.2);
+    auto default_team_color = declare_parameter("default_team_color", std::string("red"));
+    std::transform(default_team_color.begin(), default_team_color.end(), default_team_color.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (default_team_color == "blue")
+        color = team_color::C_BLUE;
+    else
+        color = team_color::C_RED;
+    RCLCPP_INFO(get_logger(), "Default team color: %s", color == team_color::C_BLUE ? "BLUE" : "RED");
     if (declare_parameter("no_bot_5", false))
         robot_num = 5;
     else
@@ -33,7 +44,15 @@ MultiplexerNode::MultiplexerNode()
     match_result_sub = create_subscription<radar_interface::msg::MatchResult>("matcher/match_result",
         rclcpp::SystemDefaultsQoS(), [this](const radar_interface::msg::MatchResult& msg) {last_match_result = msg;});
     detected_sub = create_subscription<radar_interface::msg::TargetArray>("pc_detector/targets",
-        rclcpp::SystemDefaultsQoS(), [this](const radar_interface::msg::TargetArray& msg) { last_detected = msg; });
+        rclcpp::SystemDefaultsQoS(), [this](const radar_interface::msg::TargetArray& msg) {
+            if (!msg.targets.empty()) {
+                last_detected = msg;
+                
+                return;
+            }
+
+                last_detected = msg;
+        });
     radar_mark_sub = create_subscription<radar_interface::msg::RadarMarkData>("judge/radar_mark_data",
         rclcpp::SystemDefaultsQoS(), std::bind(&MultiplexerNode::radar_mark_callback, this, std::placeholders::_1));
     team_color_sub = create_subscription<radar_interface::team_color::msg>("judge/color",
@@ -42,7 +61,7 @@ MultiplexerNode::MultiplexerNode()
     map_pub = create_publisher<radar_interface::msg::MapRobotData>("judge/map_robot_data", rclcpp::SystemDefaultsQoS());
     feedback_pub = create_publisher<radar_interface::msg::FeedbackTargetArray>("matcher/feedback", rclcpp::SystemDefaultsQoS());
 
-    pub_map_timer = create_wall_timer(std::chrono::milliseconds(declare_parameter("match_send_interval", 101)),
+    pub_map_timer = create_wall_timer(std::chrono::milliseconds(declare_parameter("match_send_interval", 80)),
         std::bind(&MultiplexerNode::multiplexer, this));
 }
 

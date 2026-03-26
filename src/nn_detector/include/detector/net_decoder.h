@@ -61,6 +61,31 @@ class YOLOv8Decoder : public NetDecoderBase {
     virtual bool check_num_outputs(int num_outputs) override;
 };
 
+// DETR-based armor detector decoder
+// Output format: [batch, num_queries, 4+NUM_CLASSES+NUM_COLORS]
+//   [0:4]              = cx, cy, w, h (normalized 0-1, already sigmoid)
+//   [4:4+NUM_CLASSES]  = class scores (already sigmoid)
+//   [4+NUM_CLASSES:16] = color scores (already sigmoid)
+class DETRDecoder : public NetDecoderBase {
+   protected:
+    float min_class_score = 0.0f;
+    float min_color_score = 0.0f;
+    float class_margin = 0.0f;
+    float color_margin = 0.0f;
+    struct DETRLayerInfo {
+        int index;
+        int num_queries;
+        int num_outputs;
+    };
+    std::vector<DETRLayerInfo> layers;
+
+   public:
+    DETRDecoder(toml::value &, const rclcpp::Logger &);
+    virtual void decode(int layer_index, const float *prob, std::vector<Armor> &objects) override;
+    virtual void set_layer_info(int, const std::vector<size_t> &) override;
+    virtual bool check_num_outputs(int num_outputs) override;
+};
+
 inline float sigmoid(float x) { return (1.0 / (1.0 + exp(-x))); }
 
 /**

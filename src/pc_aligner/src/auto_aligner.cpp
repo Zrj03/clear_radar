@@ -62,6 +62,9 @@ void AlignerNode::auto_align(std::shared_ptr<open3d::geometry::PointCloud> sampl
                 Eigen::Matrix4d::Identity(),
                 open3d::pipelines::registration::TransformationEstimationPointToPoint(),
                 open3d::pipelines::registration::ICPConvergenceCriteria(1e-6, 1e-6, max_iteration)); };
+
+    double final_rmse = std::numeric_limits<double>::infinity();
+    double final_fitness = 0.0;
     if (get_parameter("vis_auto").as_bool())
     {
         auto vis = open3d::visualization::Visualizer();
@@ -71,6 +74,8 @@ void AlignerNode::auto_align(std::shared_ptr<open3d::geometry::PointCloud> sampl
 
         for (unsigned i = 0; i < get_parameter("max_iteration").as_int() && rclcpp::ok(); ++i) {
             auto reg_p2l = reg(1);
+            final_rmse = reg_p2l.inlier_rmse_;
+            final_fitness = reg_p2l.fitness_;
             vis.UpdateGeometry(cropped);
             vis.PollEvents();
             vis.UpdateRender();
@@ -80,9 +85,22 @@ void AlignerNode::auto_align(std::shared_ptr<open3d::geometry::PointCloud> sampl
         }
     } else {
         auto reg_p2l = reg(get_parameter("max_iteration").as_int());
+        final_rmse = reg_p2l.inlier_rmse_;
+        final_fitness = reg_p2l.fitness_;
         RCLCPP_INFO(get_logger(), "Align RMSE: %f, Fitness: %f", reg_p2l.inlier_rmse_, reg_p2l.fitness_);
         cropped->Transform(reg_p2l.transformation_);
         trans = reg_p2l.transformation_ * trans;
+    }
+
+    if (get_parameter("quality_gate.enable").as_bool()) {
+        const double max_rmse = get_parameter("quality_gate.max_rmse").as_double();
+        const double min_fitness = get_parameter("quality_gate.min_fitness").as_double();
+        if (final_rmse > max_rmse || final_fitness < min_fitness) {
+            RCLCPP_WARN(get_logger(),
+                "Alignment rejected by quality gate: rmse=%.6f (limit %.6f), fitness=%.6f (limit %.6f). Keep last transform.",
+                final_rmse, max_rmse, final_fitness, min_fitness);
+            return;
+        }
     }
 
     // to_align_pc->PaintUniformColor({ 1, 1, 1 });

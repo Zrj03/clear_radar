@@ -6,11 +6,18 @@
 std::vector<TargetDetector::Target> TargetDetector::filter_targets(const cv::Point2i& img_size, const TargetArray::ConstSharedPtr& msg)
 {
     std::vector<TargetDetector::Target> rtn;
+    constexpr double BORDER_MARGIN_RATIO = 0.5;
+    const double x_min = -img_size.x * BORDER_MARGIN_RATIO;
+    const double y_min = -img_size.y * BORDER_MARGIN_RATIO;
+    const double x_max = img_size.x * (1.0 + BORDER_MARGIN_RATIO);
+    const double y_max = img_size.y * (1.0 + BORDER_MARGIN_RATIO);
     for (auto& target : msg->targets) {
         Eigen::Vector3d cam_pt3_eigen = trans * Eigen::Vector3d(target.position[0], target.position[1], target.calc_z);
+        if (cam_pt3_eigen.z() <= 0)
+            continue;
         cv::Point3d cam_pt3(cam_pt3_eigen.x(), cam_pt3_eigen.y(), cam_pt3_eigen.z());
         cv::Point2d cam_pt2 = project_func(cam_pt3);
-        if (cam_pt2.x >= 0 && cam_pt2.y >= 0 && cam_pt2.x < img_size.x && cam_pt2.y < img_size.y)
+        if (cam_pt2.x >= x_min && cam_pt2.y >= y_min && cam_pt2.x < x_max && cam_pt2.y < y_max)
             rtn.emplace_back(target);
     }
     return rtn;
@@ -98,11 +105,17 @@ TargetDetector::DetectedTargetArray TargetDetector::get_detected_targets(const s
             detected_target.type = -1;
             double min_dist_sqr = 1e9;
             unsigned jig_block_size = img_size / jigsaw_size;
+            unsigned jig_x = jig_m % jigsaw_size, jig_y = jig_m / jigsaw_size;
+            cv::Point2d square_centre((jig_x + 0.5) * jig_block_size, (jig_y + 0.5) * jig_block_size);
             for (auto& target : detect_rep[jig_n]->detected_armors) {
                 // 如果目标不在拼图块内, 则跳过
-                unsigned jig_x = jig_m % jigsaw_size, jig_y = jig_m / jigsaw_size;
-                if (target.xywh[0] - target.xywh[2] / 2 < jig_x * jig_block_size || target.xywh[0] + target.xywh[2] / 2 > (jig_x + 1) * jig_block_size ||
-                    target.xywh[1] - target.xywh[3] / 2 < jig_y * jig_block_size || target.xywh[1] + target.xywh[3] / 2 > (jig_y + 1) * jig_block_size)
+                constexpr double BLOCK_MARGIN_RATIO = 0.2;
+                double block_x_min = jig_x * jig_block_size - jig_block_size * BLOCK_MARGIN_RATIO;
+                double block_x_max = (jig_x + 1) * jig_block_size + jig_block_size * BLOCK_MARGIN_RATIO;
+                double block_y_min = jig_y * jig_block_size - jig_block_size * BLOCK_MARGIN_RATIO;
+                double block_y_max = (jig_y + 1) * jig_block_size + jig_block_size * BLOCK_MARGIN_RATIO;
+                if (target.xywh[0] < block_x_min || target.xywh[0] > block_x_max ||
+                    target.xywh[1] < block_y_min || target.xywh[1] > block_y_max)
                     continue;
                 // 转换到以拼图块左上角为原点坐标
                 auto to_jig_coord = [&](cv::Point2d pt) {
@@ -120,13 +133,32 @@ TargetDetector::DetectedTargetArray TargetDetector::get_detected_targets(const s
                     auto pt_cv = to_real(to_jig_coord({ pt.x, pt.y }));
                     pt.x = pt_cv.x, pt.y = pt_cv.y;
                 }
-                
-                cv::Point2d square_centre((jig_x + 0.5) * jig_block_size, (jig_y + 0.5) * jig_block_size);
+
                 double dist_sqr = (target.xywh[0] - square_centre.x) * (target.xywh[0] - square_centre.x) + (target.xywh[1] - square_centre.y) * (target.xywh[1] - square_centre.y);
                 if (dist_sqr < min_dist_sqr) {
                     min_dist_sqr = dist_sqr;
                     detected_target.color = target.color;
-                    detected_target.type = target.type;
+                    detected_target.type = (target.type == radar_interface::msg::Armor::TYPE_0)
+                        ? -1
+                        : target.type;
+                }
+            }
+
+            if (detected_target.type == -1 || detected_target.color == -1) {
+                constexpr double FALLBACK_BLOCK_RADIUS_RATIO = 0.4;
+                double fallback_min_dist_sqr = 1e9;
+                double fallback_max_dist_sqr = jig_block_size * jig_block_size * FALLBACK_BLOCK_RADIUS_RATIO * FALLBACK_BLOCK_RADIUS_RATIO;
+                for (const auto& target : detect_rep[jig_n]->detected_armors) {
+                    double dist_sqr = (target.xywh[0] - square_centre.x) * (target.xywh[0] - square_centre.x) + (target.xywh[1] - square_centre.y) * (target.xywh[1] - square_centre.y);
+                    if (dist_sqr > fallback_max_dist_sqr)
+                        continue;
+                    if (dist_sqr < fallback_min_dist_sqr) {
+                        fallback_min_dist_sqr = dist_sqr;
+                        detected_target.color = target.color;
+                        detected_target.type = (target.type == radar_interface::msg::Armor::TYPE_0)
+                            ? -1
+                            : target.type;
+                    }
                 }
             }
             detected_targets.targets.push_back(detected_target);
@@ -142,6 +174,10 @@ foxglove_msgs::msg::ImageMarkerArray TargetDetector::get_markers(const std::vect
     foxglove_msgs::msg::ImageMarkerArray markers;
     // 对象框 (squares)
     for (unsigned i = 0; i < squares.size(); ++i) {
+            if (detected_targets.targets[i].type == radar_interface::msg::Armor::TYPE_0 || 
+                detected_targets.targets[i].type == radar_interface::msg::Armor::TYPE_SENTRY) {
+                continue;
+            }
             visualization_msgs::msg::ImageMarker marker;
             marker.header.frame_id = cam_frame;
             marker.header.stamp = detected_targets.header.stamp;
@@ -239,6 +275,11 @@ foxglove_msgs::msg::ImageAnnotations TargetDetector::get_annotiations(const std:
     assert(squares.size() == detected_targets.targets.size());
     foxglove_msgs::msg::ImageAnnotations annotations;
     for (unsigned i = 0; i < squares.size(); ++i) {
+        if (detected_targets.targets[i].type == radar_interface::msg::Armor::TYPE_0 || 
+            detected_targets.targets[i].type == radar_interface::msg::Armor::TYPE_SENTRY) {
+            continue;
+        }
+        
         foxglove_msgs::msg::TextAnnotation annotation;
         annotation.text = "Color: ";
         switch (detected_targets.targets[i].color) {

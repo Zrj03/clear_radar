@@ -194,6 +194,8 @@ std::pair<int, int> HikCameraNode::get_sensor_height_width() {
 void HikCameraNode::set_hk_params() {
     MV_CC_GetImageInfo(camera_handle, &img_info);
     static bool first_set = true;
+    static bool digital_shift_available = true;
+    static bool digital_shift_enable_checked = false;
     if (first_set) {
         first_set = false;
         UPDBW(MV_CC_SetEnumValue(camera_handle, "TriggerMode", MV_TRIGGER_MODE_OFF))
@@ -203,12 +205,28 @@ void HikCameraNode::set_hk_params() {
         UPDBW(MV_CC_SetEnumValue(camera_handle, "BalanceWhiteAuto", MV_BALANCEWHITE_AUTO_ONCE))
         UPDBW(MV_CC_SetEnumValue(camera_handle, "AcquisitionMode", MV_ACQ_MODE_CONTINUOUS))
         UPDBW(MV_CC_SetBoolValue(camera_handle, "AcquisitionFrameRateEnable", true))
-        UPDBW(MV_CC_SetBoolValue(camera_handle, "DigitalShiftEnable", true))
     }
     UPDBW(MV_CC_SetFloatValue(camera_handle, "AcquisitionFrameRate", get_parameter("frame_rate").as_double()))
     UPDBW(MV_CC_SetFloatValue(camera_handle, "ExposureTime", get_parameter("exposure_time").as_double()))
     UPDBW(MV_CC_SetFloatValue(camera_handle, "Gain", get_parameter("gain").as_double()))
-    UPDBW(MV_CC_SetFloatValue(camera_handle, "DigitalShift", get_parameter("digital_shift").as_double()))
+    const double digital_shift = get_parameter("digital_shift").as_double();
+    if (digital_shift_available && digital_shift > 0.0) {
+        if (!digital_shift_enable_checked) {
+            nRet = MV_CC_SetBoolValue(camera_handle, "DigitalShiftEnable", true);
+            if (nRet != MV_OK) {
+                RCLCPP_WARN(this->get_logger(), "DigitalShift not supported (enable failed: %x), disabling it.", (unsigned)nRet);
+                digital_shift_available = false;
+            }
+            digital_shift_enable_checked = true;
+        }
+        if (digital_shift_available) {
+            nRet = MV_CC_SetFloatValue(camera_handle, "DigitalShift", digital_shift);
+            if (nRet != MV_OK) {
+                RCLCPP_WARN(this->get_logger(), "DigitalShift not supported (set failed: %x), disabling it.", (unsigned)nRet);
+                digital_shift_available = false;
+            }
+        }
+    }
 }
 
 void HikCameraNode::grab() {

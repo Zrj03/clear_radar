@@ -16,6 +16,19 @@ public:
     using TargetValueMap = std::map<long, ValueArray>;
 
 private:
+    struct HeldMatchedTarget {
+        radar_interface::msg::MatchedTarget target;
+        rclcpp::Time stamp;
+        bool valid = false;
+    };
+
+    struct SlotSwitchState {
+        long candidate_id = -1;
+        rclcpp::Time first_seen;
+        int confirmations = 0;
+        bool valid = false;
+    };
+
     rclcpp::Subscription<radar_interface::msg::TargetArray>::SharedPtr target_sub;
     std::vector<rclcpp::Subscription<radar_interface::msg::DetectedTargetArray>::SharedPtr> detected_target_subs;
     rclcpp::Subscription<radar_interface::msg::FeedbackTargetArray>::SharedPtr feedback_sub;
@@ -26,7 +39,15 @@ private:
     rclcpp::TimerBase::SharedPtr pos_reinforce_timer;
 
     TargetValueMap targets_value_map;
+    std::map<long, rclcpp::Time> target_last_visual_confirmed;
+    std::map<long, int> target_last_strict_idx;
+    std::map<long, int> target_visual_confirm_count;
+    std::map<long, int> target_last_published_idx;
     radar_interface::msg::MatchResult result;
+    std::array<HeldMatchedTarget, 6> held_blue_targets;
+    std::array<HeldMatchedTarget, 6> held_red_targets;
+    std::array<SlotSwitchState, 6> blue_slot_switch_states;
+    std::array<SlotSwitchState, 6> red_slot_switch_states;
     radar_interface::msg::TargetArray last_targets;
 
     void target_callback(const radar_interface::msg::TargetArray::SharedPtr msg);

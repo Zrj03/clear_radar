@@ -84,6 +84,64 @@ void TargetMap::set_params(const TargetMapParams& p)
 
 }
 
+bool TargetMap::pass_new_target_hard_gate(const BoundingBox& aabb, size_t pt_num) const
+{
+    const Eigen::Vector3d span = aabb.max_bound - aabb.min_bound;
+    const double size_x = std::abs(span(0));
+    const double size_y = std::abs(span(1));
+    const double area_xy = size_x * size_y;
+    return pt_num >= params.min_new_target_points
+        && size_x >= params.min_new_target_size_x
+        && size_y >= params.min_new_target_size_y
+        && area_xy >= params.min_new_target_area;
+}
+
+size_t TargetMap::try_new_target_with_confirmation(const BoundingBox& aabb, size_t pt_num, Eigen::Vector3d grav)
+{
+    if (!pass_new_target_hard_gate(aabb, pt_num))
+        return TM_FAILED_INSERT;
+
+    if (params.min_new_target_confirmations <= 1)
+        return new_target(aabb, pt_num, grav);
+
+    int64_t best_candidate_id = -1;
+    double best_dist_sq = -1;
+    const double candidate_dist_sq = params.new_target_candidate_dist * params.new_target_candidate_dist;
+    for (auto& [id, candidate] : pending_candidates) {
+        const double dist_sq = (candidate.grav - grav).squaredNorm();
+        if (dist_sq > candidate_dist_sq)
+            continue;
+        if (best_candidate_id == -1 || dist_sq < best_dist_sq) {
+            best_candidate_id = static_cast<int64_t>(id);
+            best_dist_sq = dist_sq;
+        }
+    }
+
+    if (best_candidate_id == -1) {
+        pending_candidates.emplace(pending_inc_id++, PendingCandidate { aabb, pt_num, grav, 1, frame_seq });
+        return TM_FAILED_INSERT;
+    }
+
+    auto& candidate = pending_candidates.at(static_cast<size_t>(best_candidate_id));
+    candidate.aabb.max_bound = candidate.aabb.max_bound.cwiseMax(aabb.max_bound);
+    candidate.aabb.min_bound = candidate.aabb.min_bound.cwiseMin(aabb.min_bound);
+    const size_t merged_pt = candidate.pt_num + pt_num;
+    candidate.grav = (candidate.pt_num * candidate.grav + pt_num * grav) / merged_pt;
+    candidate.pt_num = merged_pt;
+    if (candidate.last_seen_frame != frame_seq)
+        candidate.hits++;
+    candidate.last_seen_frame = frame_seq;
+
+    if (candidate.hits < params.min_new_target_confirmations)
+        return TM_FAILED_INSERT;
+
+    const BoundingBox cand_aabb = candidate.aabb;
+    const size_t cand_pt_num = candidate.pt_num;
+    const Eigen::Vector3d cand_grav = candidate.grav;
+    pending_candidates.erase(static_cast<size_t>(best_candidate_id));
+    return new_target(cand_aabb, cand_pt_num, cand_grav);
+}
+
 /// @brief 更新跟踪队列中的一个元素
 void TargetMap::element_update(size_t id, const BoundingBox& aabb, size_t pt_num, Eigen::Vector3d grav)
 {
@@ -103,6 +161,14 @@ void TargetMap::element_update(size_t id, const BoundingBox& aabb, size_t pt_num
 /// @brief 更新前阶段处理
 void TargetMap::pre_update()
 {
+    frame_seq++;
+    for (auto it = pending_candidates.begin(); it != pending_candidates.end();) {
+        if (frame_seq - it->second.last_seen_frame > params.new_target_confirm_max_gap)
+            it = pending_candidates.erase(it);
+        else
+            ++it;
+    }
+
     for (auto& [id, target] : target_map) {
         target.pt_num = 0;
     }
@@ -197,7 +263,7 @@ size_t TargetMap::push(const BoundingBox& aabb, size_t pt_num, Eigen::Vector3d g
         return min_id;
     }
     /// 没有匹配到目标, 进行插入
-    return new_target(aabb, pt_num, grav);
+    return try_new_target_with_confirmation(aabb, pt_num, grav);
 }
 
 /// @brief 插入新的跟踪目标

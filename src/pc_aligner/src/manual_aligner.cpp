@@ -50,7 +50,9 @@ Eigen::Matrix4d AlignerNode::manual_trans_pre(std::shared_ptr<const open3d::geom
 /// @brief 完全手动配准获取初始变换矩阵
 Eigen::Matrix4d AlignerNode::manual_trans_mesh(std::shared_ptr<const open3d::geometry::PointCloud> pc2align, std::shared_ptr<const open3d::geometry::PointCloud> mesh_pc)
 {
+    RCLCPP_INFO(rclcpp::get_logger("manual_align"), "Step 1/2: select points on model point cloud, then press Q.");
     auto picked_mesh = select_points(mesh_pc);
+    RCLCPP_INFO(rclcpp::get_logger("manual_align"), "Step 2/2: select corresponding points on lidar point cloud, then press Q.");
     auto picked_pc = select_points(pc2align);
     if (picked_pc.size() < 3 || picked_mesh.size() < 3)
         throw std::runtime_error("Too few points selected.");
@@ -79,29 +81,40 @@ void AlignerNode::manual_align(std::shared_ptr<open3d::geometry::PointCloud> pc2
 
     Eigen::Matrix4d trans;
 
-    retry:
-    try {
-        if (get_parameter("use_preselect").as_bool())
-            trans = manual_trans_pre(pc2align);
-        else {
-            std::shared_ptr<open3d::geometry::PointCloud> model_pc;
-            if (align_using_mesh) {
-                model_pc = mesh_ori->SamplePointsUniformly(get_parameter("mesh_sample").as_int());
-                model_pc->colors_.resize(model_pc->points_.size());
-                for (size_t i = 0; i < model_pc->points_.size(); ++i) {
-                    if (model_pc->points_[i](0) < 14)
-                        model_pc->colors_[i] = { 1., 0., 0. };   // red
-                    else
-                        model_pc->colors_[i] = { 0., 0., 1. };   // blue
+    const bool auto_retry = get_parameter("manual_align.auto_retry_on_fail").as_bool();
+    const int max_retries = get_parameter("manual_align.max_retries").as_int();
+    int retry_count = 0;
+
+    while (rclcpp::ok()) {
+        try {
+            if (get_parameter("use_preselect").as_bool())
+                trans = manual_trans_pre(pc2align);
+            else {
+                std::shared_ptr<open3d::geometry::PointCloud> model_pc;
+                if (align_using_mesh) {
+                    model_pc = mesh_ori->SamplePointsUniformly(get_parameter("mesh_sample").as_int());
+                    model_pc->colors_.resize(model_pc->points_.size());
+                    for (size_t i = 0; i < model_pc->points_.size(); ++i) {
+                        if (model_pc->points_[i](0) < 14)
+                            model_pc->colors_[i] = { 1., 0., 0. };   // red
+                        else
+                            model_pc->colors_[i] = { 0., 0., 1. };   // blue
+                    }
+                } else {
+                    model_pc = pc_align;
                 }
-            } else {
-                model_pc = pc_align;
+                trans = manual_trans_mesh(pc2align, model_pc);
             }
-            trans = manual_trans_mesh(pc2align, model_pc);
+            break;
+        } catch (const std::exception& e) {
+            RCLCPP_ERROR(get_logger(), "Manual align failed: %s", e.what());
+            if (!auto_retry || retry_count >= max_retries) {
+                RCLCPP_WARN(get_logger(), "Manual align aborted. Re-call service or restart if you want to retry.");
+                return;
+            }
+            ++retry_count;
+            RCLCPP_WARN(get_logger(), "Retrying manual align (%d/%d)...", retry_count, max_retries);
         }
-    } catch (const std::exception& e) {
-        RCLCPP_ERROR(get_logger(), "Manual align failed: %s", e.what());
-        goto retry;
     }
 
     middle_tf = std::make_shared<geometry_msgs::msg::TransformStamped>();
