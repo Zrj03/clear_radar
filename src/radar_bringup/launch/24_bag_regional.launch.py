@@ -140,14 +140,6 @@ def get_pc_container():
                 #     parameters=[node_params],
                 #     extra_arguments=[{'use_intra_process_comms': True}]
                 # ),
-                # ComposableNode(
-                #     package='livox_v2_lidar',
-                #     plugin='livox_v2_lidar::LidarPublisher',
-                #     name='livox_v2_lidar',
-                #     namespace='radar/' + 'lidar_hap',
-                #     parameters=[node_params],
-                #     extra_arguments=[{'use_intra_process_comms': True}]
-                # ),
                 ComposableNode(
                     package='pc_detector',
                     plugin='pc_detector::DetectorNode',
@@ -169,13 +161,6 @@ def get_pc_container():
             #     executable='livox_v1_lidar_node',
             #     name='livox_v1_lidar',
             #     namespace='radar/' + 'lidar_mid70',
-            #     parameters=[node_params],
-            # ),
-            # Node(
-            #     package='livox_v2_lidar',
-            #     executable='livox_v2_lidar_node',
-            #     name='livox_v2_lidar',
-            #     namespace='radar/' + 'lidar_hap',
             #     parameters=[node_params],
             # ),
             Node(

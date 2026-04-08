@@ -8,7 +8,6 @@ RoboMaster 2024 哈尔滨工业大学（深圳） 南工骁鹰战队 雷达站 �
 
 ```plaintext
 livox_v1_lidar      激光雷达驱动（Livox Mid-70）
-livox_v2_lidar      激光雷达驱动（Livox HAP）
 pc_aligner          点云配准
 pc_detector         点云聚类分割
 

@@ -35,9 +35,6 @@
 [submodule "radar_supervisor"]
 	path = src/radar_supervisor
 	url = https://gitlab.ngxy.team/algo/radar/radar_supervisor.git
-[submodule "livox_v2_lidar"]
-	path = src/livox_v2_lidar
-	url = https://gitlab.ngxy.team/algo/radar/livox_v2_lidar.git
 [submodule "livox_v1_lidar"]
 	path = src/livox_v1_lidar
 	url = https://gitlab.ngxy.team/algo/radar/livox_v1_lidar.git
