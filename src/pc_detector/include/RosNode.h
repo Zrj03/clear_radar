@@ -16,6 +16,7 @@
 #include <future>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include <open3d/Open3D.h>
@@ -49,9 +50,14 @@ private:
     std::shared_ptr<open3d::geometry::TriangleMesh> mesh_ori;
     std::shared_ptr<open3d::geometry::TriangleMesh> mesh_filter;
     std::shared_ptr<open3d::geometry::PointCloud> pc_filter;
+    bool static_map_prior_enable = false;
+    double static_map_prior_max_nn_dist2 = 0.0;
+    std::shared_ptr<open3d::geometry::PointCloud> static_map_prior_pc;
+    std::unique_ptr<open3d::geometry::KDTreeFlann> static_map_prior_kdtree;
 
     std::vector<LidarContext::SharedPtr> lidars;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr filtered_pc_publisher;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr centroid_publisher;
     std::deque<UnpackedPcMsg> pc_buffer;
     rclcpp::Publisher<radar_interface::msg::TargetArray>::SharedPtr target_publisher;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_publisher;
@@ -60,7 +66,9 @@ private:
 
     void update_parameters();
     void pc_recv_callback(const sensor_msgs::msg::PointCloud2& msg, const LidarContext::SharedPtr l_ctx);
+    bool is_static_prior_point(const Eigen::Vector3d& pt) const;
     void pub_solved_pc(const std::vector<Eigen::Vector3d>& points, const std::vector<int>& clustered_labels, const std::vector<int>& tracking_ids);
+    void pub_cluster_centroids(const std::vector<Eigen::Vector3d>& cluster_centroids);
     void pub_targets(const rclcpp::Time& time);
 
     void solve();

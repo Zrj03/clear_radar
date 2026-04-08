@@ -37,6 +37,8 @@ class ResultVisualizer(Node):
         self.declare_parameter('show_enemy', True)
         self.get_logger().info('Initializing result_visualizer...')
         self.ori_img = cv2.imread(os.path.join(get_package_share_directory('radar_bringup'), 'resource', 'RM2026-1.png'))
+        self.bridge = None
+        self.cv_bridge_disabled = False
         
         # 限制原图最大宽度，防止高分辨率地图导致窗口过大
         max_visual_width = 1200
@@ -53,6 +55,23 @@ class ResultVisualizer(Node):
         self.mark_data_sub = self.create_subscription(
             RadarMarkData, 'judge/radar_mark_data', self.mark_data_callback, 10)
         self.get_logger().info('Initialized result_visualizer.')
+
+    def _try_init_bridge(self):
+        if self.bridge is not None or self.cv_bridge_disabled:
+            return
+        if int(np.__version__.split('.')[0]) >= 2:
+            self.cv_bridge_disabled = True
+            self.get_logger().warn(
+                'NumPy>=2 detected; skip cv_bridge import to avoid ABI crash. result_image will not be published.')
+            return
+        try:
+            from cv_bridge import CvBridge
+            self.bridge = CvBridge()
+            self.get_logger().info('cv_bridge initialized for result image publishing.')
+        except Exception as e:
+            self.cv_bridge_disabled = True
+            self.get_logger().error(
+                f'cv_bridge unavailable, disable result_image publish: {e}')
 
     def team_color_callback(self, msg: Bool):
         self.team_color = msg.data
@@ -118,10 +137,10 @@ class ResultVisualizer(Node):
             for i, target in enumerate(enemy_targets):
                 draw(enemy_red, i, target, False)
 
-        from cv_bridge import CvBridge
-        bridge = CvBridge()
-        img = bridge.cv2_to_imgmsg(now_img, encoding="bgr8")
-        self.img_pub.publish(img)
+        self._try_init_bridge()
+        if self.bridge is not None:
+            img = self.bridge.cv2_to_imgmsg(now_img, encoding="bgr8")
+            self.img_pub.publish(img)
         if self.get_parameter('im_show').value:
             cv2.namedWindow('result', cv2.WINDOW_NORMAL)
             cv2.imshow('result', now_img)

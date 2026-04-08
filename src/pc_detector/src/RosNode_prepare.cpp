@@ -66,7 +66,12 @@ void DetectorNode::prepare_meshes()
     declare_parameter("mesh.mesh_ori", "bg2align.stl");
     declare_parameter("mesh.mesh_filter", "bg2filter.stl");
     declare_parameter("mesh.pc_filter", "bg2filter.pcd");
+    declare_parameter("mesh.scale", 0.001);
     declare_parameter("mesh.init_translate", std::vector<double> { 0., 0., 0. });
+    declare_parameter("static_map_prior.enable", true);
+    declare_parameter("static_map_prior.map_pcd", "RM2026.pcd");
+    declare_parameter("static_map_prior.voxel_down_sample", 0.08);
+    declare_parameter("static_map_prior.max_nn_dist", 0.12);
 
     std::string filter_mode = declare_parameter("mesh.filter_mode", "mesh"); // option: mesh, pointcloud
     if (filter_mode == "mesh")
@@ -79,6 +84,7 @@ void DetectorNode::prepare_meshes()
     }
 
     auto init_translate_v = get_parameter("mesh.init_translate").as_double_array();
+    const double mesh_scale = get_parameter("mesh.scale").as_double();
     Eigen::Vector3d init_translate(init_translate_v[0], init_translate_v[1], init_translate_v[2]);
 
     std::filesystem::path resource_path = std::filesystem::path(ament_index_cpp::get_package_share_directory("radar_bringup")) / "resource";
@@ -90,7 +96,7 @@ void DetectorNode::prepare_meshes()
     }
     mesh_ori->ComputeVertexNormals();
     mesh_ori->ComputeTriangleNormals();
-    mesh_ori->Scale(0.001, Eigen::Vector3d::Zero());
+    mesh_ori->Scale(mesh_scale, Eigen::Vector3d::Zero());
     mesh_ori->Translate(init_translate);
 
     if (mesh_filter_mode) {
@@ -101,7 +107,7 @@ void DetectorNode::prepare_meshes()
             RCLCPP_ERROR(get_logger(), "mesh_filter is null");
             return;
         }
-        mesh_filter->Scale(0.001, Eigen::Vector3d::Zero());
+        mesh_filter->Scale(mesh_scale, Eigen::Vector3d::Zero());
         mesh_filter->Translate(init_translate);
     } else {
         std::string pc_filename = resource_path / get_parameter("mesh.pc_filter").as_string();
@@ -110,6 +116,26 @@ void DetectorNode::prepare_meshes()
         if (!pc_filter) {
             RCLCPP_ERROR(get_logger(), "pc_filter is null");
             return;
+        }
+    }
+
+    static_map_prior_enable = get_parameter("static_map_prior.enable").as_bool();
+    if (static_map_prior_enable) {
+        const auto static_map_filename = (resource_path / get_parameter("static_map_prior.map_pcd").as_string()).string();
+        RCLCPP_INFO(get_logger(), "static_map_prior: %s", static_map_filename.c_str());
+        static_map_prior_pc = open3d::io::CreatePointCloudFromFile(static_map_filename);
+        if (!static_map_prior_pc || static_map_prior_pc->points_.empty()) {
+            RCLCPP_WARN(get_logger(), "Failed to load static map prior pointcloud, disable static_map_prior");
+            static_map_prior_enable = false;
+        } else {
+            const double voxel_ds = get_parameter("static_map_prior.voxel_down_sample").as_double();
+            if (voxel_ds > 1e-6)
+                static_map_prior_pc = static_map_prior_pc->VoxelDownSample(voxel_ds);
+            static_map_prior_kdtree = std::make_unique<open3d::geometry::KDTreeFlann>(*static_map_prior_pc);
+            const double max_nn_dist = get_parameter("static_map_prior.max_nn_dist").as_double();
+            static_map_prior_max_nn_dist2 = max_nn_dist * max_nn_dist;
+            RCLCPP_INFO(get_logger(), "static_map_prior ready, points=%zu, max_nn_dist=%.3f",
+                static_map_prior_pc->points_.size(), max_nn_dist);
         }
     }
 

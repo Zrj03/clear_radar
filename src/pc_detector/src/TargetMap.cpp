@@ -334,7 +334,7 @@ void TargetMap::seperate(const BoundingBox &aabb, const PointCloud &pc)
 /// @param pc 点云
 /// @param cluster_labels 聚类标签（原始标签）
 /// @param tracking_ids 点对应的跟踪目标的id
-void TargetMap::update(const PointCloud& pc, std::vector<int> &cluster_labels, std::vector<int> &tracking_ids)
+void TargetMap::update(const PointCloud& pc, std::vector<int> &cluster_labels, std::vector<int> &tracking_ids, std::vector<Eigen::Vector3d>& cluster_centroids)
 {
     std::vector<BoundingBox> aabbs;
     std::vector<size_t> pt_nums;
@@ -343,6 +343,8 @@ void TargetMap::update(const PointCloud& pc, std::vector<int> &cluster_labels, s
     std::vector<std::shared_ptr<PointCloud>> pcs;
     PointCloud pc_noise;
     cluster(pc, params.normal.eps, params.normal.min_points, cluster_labels, pcs, pc_noise, aabbs, pt_nums, grav);
+    // 保存聚类的质心点供发布使用
+    cluster_centroids = grav;
     pre_update();
     /// 贪心算法
     // spdlog::info("TargetMap: Update {} clusters.", pcs.size());

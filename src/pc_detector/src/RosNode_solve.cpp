@@ -87,6 +87,61 @@ void DetectorNode::pub_solved_pc(const std::vector<Eigen::Vector3d>& points, con
     filtered_pc_publisher->publish(cloud);
 }
 
+/// @brief 发布聚类质心标注点
+void DetectorNode::pub_cluster_centroids(const std::vector<Eigen::Vector3d>& cluster_centroids)
+{
+    if (cluster_centroids.empty()) {
+        return;
+    }
+    
+    sensor_msgs::msg::PointCloud2 centroid_cloud;
+    sensor_msgs::PointCloud2Modifier(centroid_cloud).setPointCloud2Fields(
+        3,
+        "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+        "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+        "z", 1, sensor_msgs::msg::PointField::FLOAT32);
+    
+    centroid_cloud.header.frame_id.assign("world");
+    centroid_cloud.header.stamp = pc_buffer.back().timestamp;
+    centroid_cloud.height = 1;
+    centroid_cloud.width = cluster_centroids.size();
+    centroid_cloud.row_step = centroid_cloud.width * centroid_cloud.point_step;
+    centroid_cloud.is_bigendian = false;
+    centroid_cloud.is_dense = true;
+    centroid_cloud.data.resize(centroid_cloud.row_step);
+    
+    auto iter_x = sensor_msgs::PointCloud2Iterator<float>(centroid_cloud, "x");
+    auto iter_y = sensor_msgs::PointCloud2Iterator<float>(centroid_cloud, "y");
+    auto iter_z = sensor_msgs::PointCloud2Iterator<float>(centroid_cloud, "z");
+    
+    for (size_t i = 0; i < cluster_centroids.size(); ++i) {
+        *iter_x = cluster_centroids[i](0);
+        *iter_y = cluster_centroids[i](1);
+        *iter_z = cluster_centroids[i](2);
+        ++iter_x;
+        ++iter_y;
+        ++iter_z;
+    }
+    
+    // 创建标记发行器（如果还没有的话）
+    if (!centroid_publisher) {
+        centroid_publisher = create_publisher<sensor_msgs::msg::PointCloud2>("detected_centroids", rclcpp::SystemDefaultsQoS());
+    }
+    centroid_publisher->publish(centroid_cloud);
+}
+
+bool DetectorNode::is_static_prior_point(const Eigen::Vector3d& pt) const
+{
+    if (!static_map_prior_enable || !static_map_prior_pc || !static_map_prior_kdtree)
+        return false;
+
+    std::vector<int> nn_indices;
+    std::vector<double> nn_dist2;
+    if (static_map_prior_kdtree->SearchKNN(pt, 1, nn_indices, nn_dist2) <= 0)
+        return false;
+    return !nn_dist2.empty() && nn_dist2[0] <= static_map_prior_max_nn_dist2;
+}
+
 void DetectorNode::pc_recv_callback(const sensor_msgs::msg::PointCloud2& msg, const LidarContext::SharedPtr l_ctx)
 {
     if (!radar_interface::check_lidar_msg(msg))
@@ -135,7 +190,7 @@ void DetectorNode::pc_recv_callback(const sensor_msgs::msg::PointCloud2& msg, co
         // RCLCPP_INFO(get_logger(), "pt: %f, %f, %f, tag=%d, occc=%d", pt(0), pt(1), pt(2), points[i].tag, voxel_grid.is_occupied(pt));
         // 过滤 https://www.livoxtech.com/cn/showcase/livox-tag
         // if (!voxel_grid->is_occupied(pt) && (points[i].tag & 0b111111) == 0)
-        if (!l_ctx->voxel_grid.is_occupied(pt))
+        if (!l_ctx->voxel_grid.is_occupied(pt) && !is_static_prior_point(pt))
             unpacked.points.emplace_back(std::move(pt));
     }
     // pub_filtered_pc(unpacked.points);
@@ -264,7 +319,9 @@ void DetectorNode::solve()
     for (const auto& unpacked : pc_buffer)
         pc.points_.insert(pc.points_.end(), unpacked.points.begin(), unpacked.points.end());
     std::vector<int> clustered_labels, tracking_ids;
-    target_map.update(pc, clustered_labels, tracking_ids);
+    std::vector<Eigen::Vector3d> cluster_centroids;
+    target_map.update(pc, clustered_labels, tracking_ids, cluster_centroids);
     pub_solved_pc(pc.points_, clustered_labels, tracking_ids);
+    pub_cluster_centroids(cluster_centroids);
     pub_targets(pc_buffer.back().timestamp);
 }

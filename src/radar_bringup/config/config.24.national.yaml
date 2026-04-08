@@ -25,7 +25,9 @@
     manual_crop.min: [0., -10., -10.]
     manual_crop.max: [30., 15., 10.]
 
-    mesh: "24_bg2align_fix1.stl"
+    align_model: "mesh"
+    mesh: "rm_2026_19M.stl"
+    mesh_scale: 0.00096
     init_translate: [0.0, 0.0, 0.0]
 
 /radar/pc_detector:
@@ -34,9 +36,18 @@
     node.buffer_frame_size: 3
     node.lidars: ['lidar_mid70']
 
-    mesh.mesh_ori: "24_bg2align_fix1.stl"
-    mesh.mesh_filter: "24_bg2filter_fix1.stl"
+    mesh.mesh_ori: "rm_2026_19M.stl"
+    mesh.mesh_filter: "rm_2026_19M.stl"
+    mesh.scale: 0.00096
     mesh.init_translate: [0.0, 0.0, 0.0]
+
+    # 先验点云地图静态场景参考（剔除与静态地图重合的点）
+    static_map_prior.enable: true
+    static_map_prior.map_pcd: "RM2026.pcd"
+    # 地图降采样体素（单位: m）
+    static_map_prior.voxel_down_sample: 0.08
+    # 与先验地图最近邻距离阈值（单位: m）
+    static_map_prior.max_nn_dist: 0.12
 
     # 体素网格滤波器体素大小 单位: m
     voxel_grid.voxel_size: 0.08
@@ -115,9 +126,9 @@
   ros__parameters:
     sn: DA8184809
     camera_info_url: "package://hik_camera/config/6mm.yaml"
-    exposure_time: 4000.0
-    gain: 15.0
-    digital_shift: 0.0
+    exposure_time: 25000.0
+    gain: 28.0
+    digital_shift: 1.0
     frame_rate: 30.0
     use_sensor_data_qos: false
 

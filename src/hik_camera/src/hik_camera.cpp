@@ -95,7 +95,7 @@ void HikCameraNode::declare_params() {
     this->declare_parameter("sn", "");
     // https://github.com/ros-perception/image_common/blob/136807edb7ff13452214a296fb4819bc63b5b09e/image_transport/src/camera_common.cpp#L62
     this->declare_parameter("camera_info_url", "package://hik_camera/config/6mm.yaml");
-    this->declare_parameter("exposure_time", 4000.0);
+    this->declare_parameter("exposure_time", 12000.0);
     this->declare_parameter("gain", 15.0);
     this->declare_parameter("digital_shift", 6.0);
     this->declare_parameter("frame_rate", 60.0);

@@ -30,11 +30,6 @@ public:
 
 private:
     rclcpp::Logger logger_;
-
-    // Accumulation buffers
-    int accumulate_time = 5;
-    int accumulate_count = 0;
-    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> other_accumulated_clouds_;
 };
 
 } // namespace nn_detector

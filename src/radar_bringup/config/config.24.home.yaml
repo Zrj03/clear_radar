@@ -98,7 +98,7 @@
 /radar/hik_6mm/hik_camera:
   ros__parameters:
     frame_rate: 30.0
-    exposure_time: 6000.0
+    exposure_time: 12000.0
 
 /radar/hik_6mm/img_recognizer:
   ros__parameters:

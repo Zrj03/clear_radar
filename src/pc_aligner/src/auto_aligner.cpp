@@ -48,20 +48,14 @@ void AlignerNode::auto_align(std::shared_ptr<open3d::geometry::PointCloud> sampl
         cropped->Transform(trans);
 
     auto reg = [&](long max_iteration) {
-        if (align_using_mesh)
-            return open3d::pipelines::registration::RegistrationICP(
-                *cropped, *to_align_pc,
-                get_parameter("max_corr_dist").as_double(),
-                Eigen::Matrix4d::Identity(),
-                open3d::pipelines::registration::TransformationEstimationPointToPlane(),
-                open3d::pipelines::registration::ICPConvergenceCriteria(1e-6, 1e-6, max_iteration));
-        else
-            return open3d::pipelines::registration::RegistrationICP(
-                *cropped, *to_align_pc,
-                get_parameter("max_corr_dist").as_double(),
-                Eigen::Matrix4d::Identity(),
-                open3d::pipelines::registration::TransformationEstimationPointToPoint(),
-                open3d::pipelines::registration::ICPConvergenceCriteria(1e-6, 1e-6, max_iteration)); };
+        // 使用 GICP (Generalized ICP) 替代原来的 ICP
+        // GICP 在处理噪声和异常值时性能更好，对于点云配准更鲁棒
+        return open3d::pipelines::registration::RegistrationGeneralizedICP(
+            *cropped, *to_align_pc,
+            get_parameter("max_corr_dist").as_double(),
+            Eigen::Matrix4d::Identity(),
+            open3d::pipelines::registration::TransformationEstimationForGeneralizedICP(),
+            open3d::pipelines::registration::ICPConvergenceCriteria(1e-6, 1e-6, max_iteration)); };
 
     double final_rmse = std::numeric_limits<double>::infinity();
     double final_fitness = 0.0;

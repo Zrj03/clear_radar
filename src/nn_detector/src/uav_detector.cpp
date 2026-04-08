@@ -69,21 +69,8 @@ void UAVDetector::detect(const sensor_msgs::msg::PointCloud2::SharedPtr msg,
         }
     }
 
-    // 点云累积：多帧融合，提升检测鲁棒性
-    if (accumulate_count < accumulate_time) {
-        other_accumulated_clouds_.push_back(other_filtered_cloud.makeShared());
-        accumulate_count++;
-    } else {
-        if (!other_accumulated_clouds_.empty()) {
-            other_accumulated_clouds_.erase(other_accumulated_clouds_.begin());
-            other_accumulated_clouds_.push_back(other_filtered_cloud.makeShared());
-        }
-    }
-
-    // 合并所有累积帧点云
-    for (auto& cloud : other_accumulated_clouds_) {
-        other_accumulated_cloud_out += *cloud;
-    }
+    // 上游点云已由 pc_detector 按配置完成多帧积累，这里直接使用当前输入。
+    other_accumulated_cloud_out = std::move(other_filtered_cloud);
 
     // 检测逻辑：对累积点云应用各区域过滤器，统计点数
     // pcl::PointCloud<pcl::PointXYZ> dart_cloud;  // 飞镖检测已禁用

@@ -5,6 +5,9 @@
 #include <open3d/Open3D.h>
 #include <tf2_eigen/tf2_eigen.hpp>
 
+// 选择点云中的点
+// @param pcd: 输入点云
+// @return 返回用户选择的点的索引
 std::vector<size_t> select_points(std::shared_ptr<const open3d::geometry::PointCloud> pcd)
 {
     RCLCPP_INFO(rclcpp::get_logger("pick_point"), "Select points...");
@@ -20,6 +23,8 @@ std::vector<size_t> select_points(std::shared_ptr<const open3d::geometry::PointC
     return vis_.GetPickedPoints();
 }
 
+// 读取预先选择的点云文件
+// @return 返回点云对象
 std::shared_ptr<const open3d::geometry::PointCloud> AlignerNode::read_preselected_pc()
 {
     std::filesystem::path pc_path = std::filesystem::path(ament_index_cpp::get_package_share_directory("radar_bringup")) / "resource" / get_parameter("preselect_pcd").as_string();
@@ -27,7 +32,9 @@ std::shared_ptr<const open3d::geometry::PointCloud> AlignerNode::read_preselecte
     return pc2align;
 }
 
-/// @brief 利用预选择的点进行手动配准获取初始变换矩阵
+// 利用预选择的点进行手动配准获取初始变换矩阵
+// @param pc2align: 待配准的点云
+// @return 初始变换矩阵
 Eigen::Matrix4d AlignerNode::manual_trans_pre(std::shared_ptr<const open3d::geometry::PointCloud> pc2align)
 {
     auto preselected = read_preselected_pc();
@@ -47,7 +54,10 @@ Eigen::Matrix4d AlignerNode::manual_trans_pre(std::shared_ptr<const open3d::geom
     return pointToPoint.ComputeTransformation(*pc2align, *preselected, correspondences);
 }
 
-/// @brief 完全手动配准获取初始变换矩阵
+// 完全手动配准获取初始变换矩阵
+// @param pc2align: 待配准的点云
+// @param mesh_pc: 模型点云
+// @return 初始变换矩阵
 Eigen::Matrix4d AlignerNode::manual_trans_mesh(std::shared_ptr<const open3d::geometry::PointCloud> pc2align, std::shared_ptr<const open3d::geometry::PointCloud> mesh_pc)
 {
     RCLCPP_INFO(rclcpp::get_logger("manual_align"), "Step 1/2: select points on model point cloud, then press Q.");
@@ -65,6 +75,8 @@ Eigen::Matrix4d AlignerNode::manual_trans_mesh(std::shared_ptr<const open3d::geo
     return pointToPoint.ComputeTransformation(*pc2align, *mesh_pc, correspondences);
 }
 
+// 手动配准主函数
+// @param pc2align_: 输入点云
 void AlignerNode::manual_align(std::shared_ptr<open3d::geometry::PointCloud> pc2align_)
 {
     RCLCPP_INFO(get_logger(), "Manual align...");
@@ -117,6 +129,37 @@ void AlignerNode::manual_align(std::shared_ptr<open3d::geometry::PointCloud> pc2
         }
     }
 
+    // 使用 GICP 对手动配准得到的初始变换进行精细化
+    RCLCPP_INFO(get_logger(), "Refining manual align with GICP...");
+    auto pc2align_copy = std::make_shared<open3d::geometry::PointCloud>(*pc2align);
+    pc2align_copy->Transform(trans);
+
+    std::shared_ptr<open3d::geometry::PointCloud> to_align_pc_manual;
+    if (align_using_mesh) {
+        auto mesh_pc = mesh_ori->SamplePointsUniformly(get_parameter("mesh_sample").as_int());
+        to_align_pc_manual = std::make_shared<open3d::geometry::PointCloud>();
+        for (size_t i = 0; i < mesh_pc->points_.size(); ++i) {
+            if (mesh_pc->points_.at(i).z() >= -1e-3) {
+                to_align_pc_manual->points_.push_back(mesh_pc->points_.at(i));
+                to_align_pc_manual->normals_.push_back(mesh_pc->normals_.at(i));
+            }
+        }
+    } else {
+        to_align_pc_manual = pc_align;
+    }
+
+    // 进行 GICP 精细化（较少迭代次数，因为已有初始对齐）
+    auto reg_gicp = open3d::pipelines::registration::RegistrationGeneralizedICP(
+        *pc2align_copy, *to_align_pc_manual,
+        get_parameter("max_corr_dist").as_double(),
+        Eigen::Matrix4d::Identity(),
+        open3d::pipelines::registration::TransformationEstimationForGeneralizedICP(),
+        open3d::pipelines::registration::ICPConvergenceCriteria(1e-6, 1e-6, 5));
+    
+    trans = reg_gicp.transformation_ * trans;
+    RCLCPP_INFO(get_logger(), "Manual GICP refinement - RMSE: %f, Fitness: %f", 
+                reg_gicp.inlier_rmse_, reg_gicp.fitness_);
+
     middle_tf = std::make_shared<geometry_msgs::msg::TransformStamped>();
     middle_tf->header.stamp = now();
     middle_tf->header.frame_id = get_parameter("sample_lidar").as_string() + "_frame";
@@ -124,9 +167,11 @@ void AlignerNode::manual_align(std::shared_ptr<open3d::geometry::PointCloud> pc2
     middle_tf->transform = tf2::eigenToTransform(Eigen::Affine3d(trans).inverse()).transform;
 
     tf_broadcaster->sendTransform(*middle_tf);
-    RCLCPP_INFO(get_logger(), "Manual align done.");
+    RCLCPP_INFO(get_logger(), "Manual align done (with GICP refinement).");
 }
 
+// 发布点云中的点作为可视化标记
+// @param pc: 输入点云
 void AlignerNode::pub_add_points(std::shared_ptr<const open3d::geometry::PointCloud> pc)
 {
     visualization_msgs::msg::MarkerArray marker_array;
@@ -188,6 +233,8 @@ void AlignerNode::pub_add_points(std::shared_ptr<const open3d::geometry::PointCl
     marker_pub->publish(marker_array);
 }
 
+// 删除点云中的可视化标记
+// @param size: 点的数量
 void AlignerNode::pub_del_points(unsigned size)
 {
     visualization_msgs::msg::MarkerArray marker_array;

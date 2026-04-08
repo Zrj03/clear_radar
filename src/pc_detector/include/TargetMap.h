@@ -115,7 +115,7 @@ public:
     std::queue<size_t> discarded_queue;
 
     size_t push(const BoundingBox& aabb, size_t pt_num, Eigen::Vector3d grav, const open3d::geometry::PointCloud& pc, bool no_strict = false);
-    void update(const open3d::geometry::PointCloud& pc, std::vector<int>& cluster_labels, std::vector<int>& tracking_ids);
+    void update(const open3d::geometry::PointCloud& pc, std::vector<int>& cluster_labels, std::vector<int>& tracking_ids, std::vector<Eigen::Vector3d>& cluster_centroids);
     void loose_query(const open3d::geometry::PointCloud& pc);
 };
 }

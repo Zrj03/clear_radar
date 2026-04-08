@@ -9,8 +9,10 @@
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <vector>
 
+// 构造函数：初始化节点并声明参数
 AlignerNode::AlignerNode() : Node("pc_aligner")
 {
+    // 声明参数，设置默认值
     declare_parameter("sample_lidar", "lidar");
     declare_parameter("init_sample", 100000);
     declare_parameter("startup_manual_align", false);
@@ -25,12 +27,13 @@ AlignerNode::AlignerNode() : Node("pc_aligner")
     declare_parameter("quality_gate.max_rmse", 0.24);
     declare_parameter("quality_gate.min_fitness", 0.80);
 
-    declare_parameter("use_preselect", false);
+    declare_parameter("use_preselect", false); // 根据预选点进行对齐
     declare_parameter("preselect_pcd", "preselect.pcd");
 
     declare_parameter("vis_auto", true);
     declare_parameter("align_model", "mesh");
     declare_parameter("mesh", "bg2align.stl");
+    declare_parameter("mesh_scale", 0.001);
     declare_parameter("pointcloud", "bg2align.pcd");
 
     declare_parameter("manual_crop.min", std::vector<double> { 0, -15., -15. });
@@ -77,6 +80,8 @@ AlignerNode::AlignerNode() : Node("pc_aligner")
     auto_align_service = create_service<radar_interface::srv::AutoAlign>("auto_align", std::bind(&AlignerNode::auto_align_service_callback, this, std::placeholders::_1, std::placeholders::_2));
 }
 
+// 启动点云采样
+// @param callback: 采样完成后的回调函数
 void AlignerNode::start_sample(std::function<void(std::shared_ptr<open3d::geometry::PointCloud>)> callback)
 {
     if (pc_sample_context) {
@@ -94,6 +99,7 @@ void AlignerNode::start_sample(std::function<void(std::shared_ptr<open3d::geomet
     pc_sample_context->recv_pc->points_.reserve(pc_sample_context->sample_size);
 }
 
+// 定时器回调函数：发布 TF 变换
 void AlignerNode::timer_callback()
 {
     if (world_tf && !world_tf->header.frame_id.empty() && !world_tf->child_frame_id.empty()) {
@@ -106,6 +112,9 @@ void AlignerNode::timer_callback()
     }
 }
 
+// 自动配准服务回调函数
+// @param request: 服务请求，包含最大对应距离和最大迭代次数
+// @param response: 服务响应（未使用）
 void AlignerNode::auto_align_service_callback(const std::shared_ptr<radar_interface::srv::AutoAlign_Request> request,
     std::shared_ptr<radar_interface::srv::AutoAlign_Response>)
 {
@@ -117,6 +126,9 @@ void AlignerNode::auto_align_service_callback(const std::shared_ptr<radar_interf
     start_sample(std::bind(&AlignerNode::auto_align, this, std::placeholders::_1, get_middle_trans(), request->inherit_last));
 }
 
+// 手动配准服务回调函数
+// @param request: 空请求
+// @param response: 空响应
 void AlignerNode::manual_align_service_callback(const std::shared_ptr<std_srvs::srv::Empty::Request>,
     std::shared_ptr<std_srvs::srv::Empty::Response>)
 {
@@ -124,6 +136,8 @@ void AlignerNode::manual_align_service_callback(const std::shared_ptr<std_srvs::
     start_sample(std::bind(&AlignerNode::manual_align, this, std::placeholders::_1));
 }
 
+// 启动回调函数：根据参数决定是否手动配准或自动配准
+// @param sample_pc: 采样点云
 void AlignerNode::startup_callback(std::shared_ptr<open3d::geometry::PointCloud> sample_pc)
 {
     if (get_parameter("startup_manual_align").as_bool())
@@ -131,6 +145,8 @@ void AlignerNode::startup_callback(std::shared_ptr<open3d::geometry::PointCloud>
     auto_align(sample_pc, get_middle_trans());
 }
 
+// 获取中间变换矩阵
+// @return 返回中间变换矩阵的仿射变换
 Eigen::Isometry3d AlignerNode::get_middle_trans()
 {
     if (middle_tf)
@@ -158,10 +174,11 @@ void AlignerNode::prepare_meshes()
     RCLCPP_INFO(get_logger(), "meshes path: %s", meshes_path.c_str());
     if (align_model == "mesh") {
         align_using_mesh = true;
+        const double mesh_scale = get_parameter("mesh_scale").as_double();
         mesh_ori = open3d::io::CreateMeshFromFile(meshes_path / get_parameter("mesh").as_string());
         mesh_ori->ComputeVertexNormals();
         mesh_ori->ComputeTriangleNormals();
-        mesh_ori->Scale(0.001, Eigen::Vector3d::Zero());
+        mesh_ori->Scale(mesh_scale, Eigen::Vector3d::Zero());
     } else if (align_model == "pointcloud") {
         align_using_mesh = false;
         pc_align = open3d::io::CreatePointCloudFromFile(meshes_path / get_parameter("pointcloud").as_string());

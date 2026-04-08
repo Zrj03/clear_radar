@@ -119,7 +119,7 @@ def get_pc_container():
                     name='livox_v1_lidar',
                     namespace='radar/' + 'lidar_mid70',
                     parameters=[node_params],
-                    extra_arguments=[{'use_intra_process_comms': True}]
+                    extra_arguments=[{'use_intra_process_comms': False}]
                 ),
                 # ComposableNode(
                 #     package='livox_v2_lidar',
@@ -135,23 +135,23 @@ def get_pc_container():
                     name='pc_detector',
                     namespace='radar',
                     parameters=[node_params],
-                    extra_arguments=[{'use_intra_process_comms': True}]
-                ),
-                ComposableNode(
-                    package='nn_detector',
-                    plugin='nn_detector::DetectorNode',
-                    name='nn_detector',
-                    namespace='radar',
-                    parameters=[node_params],
-                    remappings=[
-                        ('lidar_mid70/livox/pointcloud', 'lidar_mid70/pc_raw'),
-                    ],
-                    extra_arguments=[{'use_intra_process_comms': True}]
+                    extra_arguments=[{'use_intra_process_comms': False}]
                 ),
             ],
             output='both',
             emulate_tty=True,
             on_exit=Shutdown(),
+        ),
+        Node(
+            package='nn_detector',
+            executable='nn_detector_node',
+            name='nn_detector',
+            namespace='radar',
+            parameters=[node_params],
+            remappings=[
+                ('lidar_mid70/livox/pointcloud', 'pc_detector/pc_filtered'),
+            ],
+            output='both',
         ),)
     else:
         return (
@@ -183,7 +183,7 @@ def get_pc_container():
                 namespace='radar',
                 parameters=[node_params],
                 remappings=[
-                    ('lidar_mid70/livox/pointcloud', 'lidar_mid70/pc_raw'),
+                    ('lidar_mid70/livox/pointcloud', 'pc_detector/pc_filtered'),
                 ],
             ),
         )
