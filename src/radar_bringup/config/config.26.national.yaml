@@ -14,7 +14,7 @@
     max_iteration: 20
     quality_gate.enable: True
     quality_gate.max_rmse: 0.24
-    quality_gate.min_fitness: 0.80
+    quality_gate.min_fitness: 0.70
     # 启用预选择点
     use_preselect: False
     # 启动时手动对齐
@@ -33,7 +33,7 @@
 /radar/pc_detector:
   ros__parameters:
     # 缓冲区帧数
-    node.buffer_frame_size: 3
+    node.buffer_frame_size: 5
     node.lidars: ['lidar_mid70']
 
     mesh.mesh_ori: "rm_2026_19M.stl"
@@ -45,9 +45,9 @@
     static_map_prior.enable: true
     static_map_prior.map_pcd: "RM2026.pcd"
     # 地图降采样体素（单位: m）
-    static_map_prior.voxel_down_sample: 0.08
-    # 与先验地图最近邻距离阈值（单位: m）
-    static_map_prior.max_nn_dist: 0.12
+    static_map_prior.voxel_down_sample: 0.06
+    # 与先验地图最近邻距离阈值（单位: m，略放宽以吃掉更多静态残留）
+    static_map_prior.max_nn_dist: 0.18
 
     # 体素网格滤波器体素大小 单位: m
     voxel_grid.voxel_size: 0.08
@@ -59,8 +59,8 @@
     # 场地模型占用扩展大小 单位: m（适当加大，过滤边界区域漏出的背景点）
     voxel_grid.occupy_expand: 0.38
 
-    # 跟踪延迟长度 单位: 帧（4秒，原12秒，缩短幽灵轨迹存活窗口）
-    target_map.last_frames: 40
+    # 跟踪延迟长度 单位: 帧
+    target_map.last_frames: 30
     # 跟踪 (马氏) 距离阈值
     target_map.dist_thres: 4.0
     # # 跟踪合并跟丢阈值 单位: 帧
@@ -76,44 +76,44 @@
     # 初始跟踪框预设丢失帧计数 单位: 帧
     target_map.init_lost: 14
     # 新目标最少点数，抑制点云碎片直接成目标
-    target_map.min_new_target_points: 55
-    # 新目标几何尺寸下限（过滤无法构成整车的碎片簇）
-    target_map.min_new_target_size_x: 0.25
-    target_map.min_new_target_size_y: 0.20
+    target_map.min_new_target_points: 20
+    # 新目标几何尺寸下限
+    target_map.min_new_target_size_x: 0.14
+    target_map.min_new_target_size_y: 0.14
     target_map.min_new_target_area: 0.06
     # 新目标最少连续确认帧数，降低短命 ID 抖动
-    target_map.min_new_target_confirmations: 7
-    # 新目标候选允许丢帧间隔（严格：仅允许1帧缺失）
+    target_map.min_new_target_confirmations: 5
+    # 新目标候选允许丢帧间隔
     target_map.new_target_confirm_max_gap: 1
     # 新目标候选聚合距离
-    target_map.new_target_candidate_dist: 0.6
+    target_map.new_target_candidate_dist: 0.45
     # 投影后 Z 轴高度 单位: m
     target_map.project_z: 0.2
 
     # Z 方向压缩比例
     clustering.z_zip: 0.2
-    # (普通参数) DBSCAN 聚类算法的聚类半径 单位: m（加大到0.45保证整车点云聚为一簇）
-    clustering.normal.eps: 0.45
+    # (普通参数) DBSCAN 聚类算法的聚类半径 单位: m
+    clustering.normal.eps: 0.35
     # (普通参数) DBSCAN 聚类算法的最少点阈值
     clustering.normal.min_points: 12
     # (宽松参数) DBSCAN 聚类算法的聚类半径 单位: m
-    clustering.loose.eps: 0.4
+    clustering.loose.eps: 0.45
     # (宽松参数) DBSCAN 聚类算法的最少点阈值
-    clustering.loose.min_points: 10
+    clustering.loose.min_points: 8
     # (宽松参数) 进行宽松聚类的扩展边界 单位: m
-    clustering.loose.box_expand: 0.2
+    clustering.loose.box_expand: 0.12
     # (严格参数) DBSCAN 聚类算法的聚类半径 单位: m
     clustering.strict.eps: 0.15
     # (严格参数) DBSCAN 聚类算法的最少点阈值
     clustering.strict.min_points: 14
 
-    # 预测协方差矩阵（减少位置滞后，同时避免速度过抖）
-    kalman_filter.q.position: 8.0e-3
-    kalman_filter.q.velocity: 1.5e-4
-    kalman_filter.q.pos_vel: 2.0e-4
-    # 观测协方差矩阵（位置和速度观测都更可信）
-    kalman_filter.r.position: 1.8e-2
-    kalman_filter.r.velocity: 2.5e-2
+    # 预测协方差矩阵
+    kalman_filter.q.position: 5.0e-4
+    kalman_filter.q.velocity: 1.0e-5
+    kalman_filter.q.pos_vel: 2.0e-5
+    # 观测协方差矩阵
+    kalman_filter.r.position: 8.0e-2
+    kalman_filter.r.velocity: 2.0e-1
     # 预测积累协方差更新比率
     kalman_filter.cov_factor: 2.0
     # 速度衰减比率
@@ -124,64 +124,74 @@
 
 /radar/hik_6mm/hik_camera:
   ros__parameters:
-    sn: DA8184809
+    # old camera sn: DB0108949
+    # sn: DB0108949
+    # 留空表示使用当前接入的第一台相机（更换相机时无需改 SN）
+    sn: ""
     camera_info_url: "package://hik_camera/config/6mm.yaml"
-    exposure_time: 25000.0
-    gain: 28.0
+    exposure_time: 16000.0
+    gain: 23.0
     digital_shift: 1.0
-    frame_rate: 30.0
+    frame_rate: 60.0
     use_sensor_data_qos: false
 
 /radar/hik_6mm/img_recognizer:
   ros__parameters:
     sync_queue_size: 12
-    sync_max_interval: 0.13
-    crop_side_length: 2400.0
+    sync_max_interval: 0.25
+    crop_side_length: 1600.0 # 裁剪框大小，缩小以减少背景混入
+    crop_center_up_bias_ratio: 0.00
+    crop_center_right_bias_ratio: 0.00
     img_compressed: False
     jigsaw_size: 3
     img_size: 384
-    armor_detector_config: "models/armor_detr.toml"
+    dump_weak_frames: false
+    weak_frame_dump_dir: "/tmp/recognizer_weak_frames"
+    weak_frame_dump_every_n: 30
+    armor_detector_config: "models/armor.toml"
     enable_imshow: True
 
 /radar/nn_detector:
   ros__parameters:
-    armor_detector_config: "models/armor_detr.toml"
+    armor_detector_config: "models/armor.toml"
     enable_imshow: true
     debug: false
 
 /radar/matcher:
   ros__parameters:
     img_ns: ['/radar/hik_6mm']
-    value_max: 10000
-    value_inc: 40
-    value_dec: 6
-    value_fail_dec: 0
-    value_match_limit: 30
-    fail_dec_min: 100
-    feedback_inc: 1000
-    feedback_dec: 500
-    pos_reinforce_inc: 10
-    pos_reinforce_max: 120
-    pos_reinforce_timeout: 200
-    pub_timeout: 100
+    value_max: 15000
+    value_inc: 60
+    value_dec: 8
+    value_fail_dec: 4
+    value_match_limit: 60
+    fail_dec_min: 20
+    feedback_inc: 1200
+    feedback_dec: 400
+    pos_reinforce_inc: 15
+    # 位置强化半径，用于视觉点云关联
+    pos_reinforce_max: 80
+    pos_reinforce_timeout: 300
+    pub_timeout: 150
     vis_per_pub: 1
-    uncertainty_limit: 80
-    require_recent_visual: false
-    visual_confirm_timeout_ms: 1500
-    min_visual_confirmations: 1
-    assignment_hold_ms: 1200
-    infantry_assignment_stickiness_bonus: 350
-    infantry_dominance_lock_margin: 800
-    slot_switch_guard_ms: 600
-    slot_switch_confirmations: 2
-    slot_switch_score_margin: 300
+    uncertainty_limit: 30
+    require_recent_visual: true
+    visual_confirm_timeout_ms: 400
+    min_visual_confirmations: 2
+    assignment_hold_ms: 500
+    infantry_assignment_stickiness_bonus: 450
+    infantry_dominance_lock_margin: 1000
+    slot_switch_guard_ms: 500
+    slot_switch_confirmations: 3
+    slot_switch_score_margin: 400
+    # 增加同色间距限制，减少拥挤时的 ID 交换（0.6 -> 1.0）
     same_color_min_separation: 0.8
 
 /radar/multiplexer:
   ros__parameters:
-    default_team_color: red
-    match_send_interval: 30
-    detected_hold_sec: 1.0
+    default_team_color: blue
+    match_send_interval: 10
+    detected_hold_sec: 1.5
     hold_guard_dist: 0.8
     double_send_thres: 80
 

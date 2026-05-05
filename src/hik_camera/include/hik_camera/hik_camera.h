@@ -13,6 +13,8 @@
 // #include <rm_interfaces/msg/rmrobot.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <std_msgs/msg/float32.hpp>
+#include <chrono>
 #include <mutex>
 
 namespace hik_camera {
@@ -52,6 +54,7 @@ private:
     HikParams params;
     // 相机图像发布
     image_transport::CameraPublisher image_pub;
+    rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr fps_pub;
 
     MV_IMAGE_BASIC_INFO img_info;
     MV_CC_PIXEL_CONVERT_PARAM convert_param;
@@ -64,6 +67,12 @@ private:
 
     int fail_cnt = 0;
     bool rotate_180 = false;
+    bool hk_first_set_ = true;
+    bool gain_available_ = true;
+    bool digital_shift_available_ = true;
+    bool digital_shift_enable_checked_ = false;
+    bool fps_log_enable_ = true;
+    double fps_log_period_sec_ = 1.0;
     std::atomic<bool> grab_on = false;
     std::atomic<bool> monitor_on = false;
     std::atomic<bool> camera_failed = false;

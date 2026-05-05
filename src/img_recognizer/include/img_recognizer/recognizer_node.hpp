@@ -44,6 +44,8 @@ private:
 
     std::shared_ptr<nn_detector::DetectorLib> detector_lib;
     // std::shared_ptr<NnHelperNode> nn_helper;
+    int diagnostics_every_n_ = 0;
+    int sync_callback_count_ = 0;
 
     void camera_info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);
     void sync_callback(const sensor_msgs::msg::Image::ConstSharedPtr& img_msg, const radar_interface::msg::TargetArray::ConstSharedPtr& target_msg);

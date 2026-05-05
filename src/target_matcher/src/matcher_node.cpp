@@ -86,7 +86,7 @@ MatcherNode::MatcherNode(const rclcpp::NodeOptions& options)
     match_result_pub = this->create_publisher<radar_interface::msg::MatchResult>("matcher/match_result", rclcpp::SystemDefaultsQoS());
     vis_pub = this->create_publisher<sensor_msgs::msg::Image>("matcher/visualization", rclcpp::SystemDefaultsQoS());
     vis_timer = this->create_wall_timer(std::chrono::milliseconds(get_parameter("pub_timeout").as_int()), std::bind(&MatcherNode::vis_timer_callback, this));
-    pos_reinforce_timer = this->create_wall_timer(std::chrono::milliseconds(get_parameter("pos_reinforce_timeout").as_int()), std::bind(&MatcherNode::pos_reinforce_timer_callback, this));
+    // pos_reinforce_timer = this->create_wall_timer(std::chrono::milliseconds(get_parameter("pos_reinforce_timeout").as_int()), std::bind(&MatcherNode::pos_reinforce_timer_callback, this));
 
     RCLCPP_INFO(this->get_logger(), "target_matcher node started.");
 }
@@ -163,10 +163,10 @@ void MatcherNode::detected_target_callback(const radar_interface::msg::DetectedT
                 }
             }
             if (idx == -1) {    // 检测到的目标颜色或类型未知
-                int reinforce_idx = pos_reinforce(detected_target.target.position[0], detected_target.target.position[1]);
-                if (reinforce_idx != -1 && value[reinforce_idx] > 0) {
-                    idx = reinforce_idx;
-                } else {
+                // int reinforce_idx = pos_reinforce(detected_target.target.position[0], detected_target.target.position[1]);
+                // if (reinforce_idx != -1 && value[reinforce_idx] > 0) {
+                //     idx = reinforce_idx;
+                // } else {
                     auto max_it = std::max_element(value.begin(), value.end());
                     long max_value = *max_it;
                     if (max_value > 0) {
@@ -182,7 +182,7 @@ void MatcherNode::detected_target_callback(const radar_interface::msg::DetectedT
                         fail_dec(value);
                         continue;
                     }
-                }
+                // }
             }
             // 增强被识别到的类型，削弱其他类型
             int value_inc = get_parameter("value_inc").as_int();
@@ -451,7 +451,7 @@ void MatcherNode::match_and_pub(const radar_interface::msg::TargetArray::SharedP
                 blue_slot_switch_states[assignment[i]].candidate_id = -1;
                 blue_slot_switch_states[assignment[i]].confirmations = 0;
                 published_targets.push_back(PublishedTarget { true, target.position });
-                RCLCPP_INFO(this->get_logger(), "Assignment: target_id=%ld -> BLUE[type=%d], scores=[%ld,%ld,%ld,%ld,%ld,%ld], pos=(%.2f,%.2f)", target.id, (int)assignment[i], value_array[0], value_array[1], value_array[2], value_array[3], value_array[4], value_array[5], target.position[0], target.position[1]);
+                RCLCPP_INFO(this->get_logger(), "Assignment: target_id=%ld -> BLUE[type=%d], blue_scores=[%ld,%ld,%ld,%ld,%ld,%ld], red_scores=[%ld,%ld,%ld,%ld,%ld,%ld], pos=(%.2f,%.2f)", target.id, (int)assignment[i], value_array[0], value_array[1], value_array[2], value_array[3], value_array[4], value_array[5], value_array[6], value_array[7], value_array[8], value_array[9], value_array[10], value_array[11], target.position[0], target.position[1]);
             } else {
                 next_result.red[assignment[i] - 6].id = target.id;
                 next_result.red[assignment[i] - 6].position = target.position;
@@ -463,7 +463,7 @@ void MatcherNode::match_and_pub(const radar_interface::msg::TargetArray::SharedP
                 red_slot_switch_states[assignment[i] - 6].candidate_id = -1;
                 red_slot_switch_states[assignment[i] - 6].confirmations = 0;
                 published_targets.push_back(PublishedTarget { false, target.position });
-                RCLCPP_INFO(this->get_logger(), "Assignment: target_id=%ld -> RED[type=%d], scores=[%ld,%ld,%ld,%ld,%ld,%ld], pos=(%.2f,%.2f)", target.id, (int)(assignment[i] - 6), value_array[6], value_array[7], value_array[8], value_array[9], value_array[10], value_array[11], target.position[0], target.position[1]);
+                RCLCPP_INFO(this->get_logger(), "Assignment: target_id=%ld -> RED[type=%d], blue_scores=[%ld,%ld,%ld,%ld,%ld,%ld], red_scores=[%ld,%ld,%ld,%ld,%ld,%ld], pos=(%.2f,%.2f)", target.id, (int)(assignment[i] - 6), value_array[0], value_array[1], value_array[2], value_array[3], value_array[4], value_array[5], value_array[6], value_array[7], value_array[8], value_array[9], value_array[10], value_array[11], target.position[0], target.position[1]);
             }
         }
     }

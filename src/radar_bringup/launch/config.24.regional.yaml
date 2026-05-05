@@ -22,7 +22,7 @@
     manual_crop.min: [0., -10., -10.]
     manual_crop.max: [30., 15., 10.]
 
-    mesh: "24_bg2align_fix1.stl"
+    mesh: "rm_2026_19M.stl"
     init_translate: [0.0, 0.0, 0.0]
 
 /radar/pc_detector:
@@ -31,7 +31,7 @@
     node.buffer_frame_size: 12
     node.lidars: ['lidar_mid70']
 
-    mesh.mesh_ori: "24_bg2align_fix1.stl"
+    mesh.mesh_ori: "rm_2026_19M.stl"
     mesh.mesh_filter: "24_bg2filter_fix1.stl"
     mesh.init_translate: [0.0, 0.0, 0.0]
 

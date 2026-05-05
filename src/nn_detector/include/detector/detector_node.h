@@ -32,6 +32,7 @@ namespace nn_detector {
 
 class DetectorNode : public rclcpp::Node {
     std::shared_ptr<DetectorLib> core;
+    DetectorParams detector_params_;
 
     rclcpp::Service<radar_interface::srv::Detect>::SharedPtr detect_service;
 
@@ -52,6 +53,7 @@ class DetectorNode : public rclcpp::Node {
 
    public:
     explicit DetectorNode(const rclcpp::NodeOptions& options);
+    void ensure_detector_ready();
 };
 };  // namespace nn_detector
 

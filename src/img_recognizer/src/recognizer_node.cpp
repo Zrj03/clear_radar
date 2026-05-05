@@ -3,6 +3,8 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <Eigen/Eigen>
+#include <filesystem>
+#include <sstream>
 #include <tf2_ros/buffer.h>
 #include <tf2_eigen/tf2_eigen.hpp>
 
@@ -15,9 +17,16 @@ RecognizerNode::RecognizerNode(const rclcpp::NodeOptions& options)
     declare_parameter("sync_queue_size", 20);
     declare_parameter("sync_max_interval", 1.0);
     declare_parameter("crop_side_length", 1500.0);
+    declare_parameter("crop_center_up_bias_ratio", 0.0);
+    declare_parameter("crop_center_right_bias_ratio", 0.0);
     declare_parameter("img_compressed", false);
     declare_parameter("jigsaw_size", 3);
     declare_parameter("img_size", 640);
+    declare_parameter("diagnostics_every_n", 30);
+    declare_parameter("log_visual_success", true);
+    declare_parameter("dump_weak_frames", false);
+    declare_parameter("weak_frame_dump_dir", "/tmp/recognizer_weak_frames");
+    declare_parameter("weak_frame_dump_every_n", 30);
 
     bool use_intra = options.use_intra_process_comms();
     if (!use_intra) {
@@ -41,6 +50,7 @@ RecognizerNode::RecognizerNode(const rclcpp::NodeOptions& options)
 
     params.node_dir = ament_index_cpp::get_package_share_directory("nn_detector");
     params.logger = get_logger();
+    diagnostics_every_n_ = get_parameter("diagnostics_every_n").as_int();
 
     tf_buffer = std::make_shared<tf2_ros::Buffer>(this->get_clock());
     tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer);
@@ -89,14 +99,170 @@ void RecognizerNode::sync_callback(const sensor_msgs::msg::Image::ConstSharedPtr
     detector.cam_frame = cam_frame;
     detector.node = this->shared_from_this();
     detector.detect_func = std::bind(&nn_detector::DetectorLib::detect, *detector_lib, std::placeholders::_1);
-    detector.project_func = std::bind(&image_geometry::PinholeCameraModel::project3dToPixel, &cam_model, std::placeholders::_1);
+    detector.project_func = [this](const cv::Point3d& cam_pt3) {
+        const cv::Point2d uv_rect = cam_model.project3dToPixel(cam_pt3);
+        if (!cam_model.initialized()) {
+            return uv_rect;
+        }
+        // 输入图像为 raw 流，投影点需从 rectified 坐标反变换回 raw 坐标。
+        return cam_model.unrectifyPoint(uv_rect);
+    };
     detector.jigsaw_size = get_parameter("jigsaw_size").as_int();
     detector.img_size = get_parameter("img_size").as_int();
 
     auto filtered = detector.filter_targets(cv::Point2i(img_msg->width, img_msg->height), target_msg);
     auto squares = detector.get_squares(filtered);
     auto detect_rep = detector.detect(img_msg, squares);
-    auto detected_targets = detector.get_detected_targets(target_msg->header, filtered, squares, detect_rep);
+    auto detected_targets = detector.get_detected_targets(target_msg->header, filtered, squares, detect_rep, img_msg->width, img_msg->height);
+
+    int visual_ok = 0;
+    int visual_unknown = 0;
+    int color_unknown = 0;
+    int type_unknown = 0;
+    for (const auto& target : detected_targets.targets) {
+        const bool known_color = target.color >= 0;
+        const bool known_type = target.type >= 0;
+        if (known_color && known_type)
+            ++visual_ok;
+        else
+            ++visual_unknown;
+        if (!known_color)
+            ++color_unknown;
+        if (!known_type)
+            ++type_unknown;
+    }
+
+    if (get_parameter("log_visual_success").as_bool() && visual_ok > 0) {
+        for (const auto& detected_target : detected_targets.targets) {
+            if (detected_target.color < 0 || detected_target.type < 0)
+                continue;
+            RCLCPP_INFO(
+                get_logger(),
+                "Recognizer visual success: target_id=%ld color=%d type=%d pos=(%.2f,%.2f)",
+                detected_target.target.id,
+                detected_target.color,
+                detected_target.type,
+                detected_target.target.position[0],
+                detected_target.target.position[1]);
+        }
+    }
+
+    ++sync_callback_count_;
+    if (diagnostics_every_n_ > 0 && sync_callback_count_ % diagnostics_every_n_ == 0) {
+        RCLCPP_INFO(
+            get_logger(),
+            "Recognizer summary: pc_targets=%zu filtered_in_image=%zu crops=%zu visual_ok=%d unknown=%d color_unknown=%d type_unknown=%d filter_reject(z<=0:%zu,x:%zu,y:%zu,xy:%zu)",
+            target_msg->targets.size(),
+            filtered.size(),
+            squares.size(),
+            visual_ok,
+            visual_unknown,
+            color_unknown,
+            type_unknown,
+            detector.last_filter_stats.behind_camera,
+            detector.last_filter_stats.x_outside,
+            detector.last_filter_stats.y_outside,
+            detector.last_filter_stats.xy_outside);
+
+        if (!filtered.empty() && visual_ok == 0) {
+            size_t raw_detect_count = 0;
+            std::ostringstream raw_detect_stream;
+            int sample_count = 0;
+            constexpr int MAX_RAW_SAMPLES = 6;
+            for (size_t jig_idx = 0; jig_idx < detect_rep.size(); ++jig_idx) {
+                const auto& rep = detect_rep[jig_idx];
+                raw_detect_count += rep->detected_armors.size();
+                for (const auto& armor : rep->detected_armors) {
+                    if (sample_count >= MAX_RAW_SAMPLES)
+                        break;
+                    raw_detect_stream
+                        << " [j" << jig_idx
+                        << " c=(" << armor.xywh[0] << "," << armor.xywh[1] << ")"
+                        << " wh=(" << armor.xywh[2] << "," << armor.xywh[3] << ")"
+                        << " conf=" << armor.conf
+                        << " color=" << armor.color
+                        << " type=" << armor.type
+                        << "]";
+                    ++sample_count;
+                }
+                if (sample_count >= MAX_RAW_SAMPLES)
+                    break;
+            }
+
+            RCLCPP_WARN(
+                get_logger(),
+                "Recognizer raw detector outputs: jigs=%zu raw_boxes=%zu samples:%s",
+                detect_rep.size(),
+                raw_detect_count,
+                raw_detect_stream.str().c_str());
+
+            std::ostringstream crop_stream;
+            for (const auto& sample : detector.last_crop_samples) {
+                crop_stream
+                    << " [id=" << sample.target_id
+                    << " world=(" << sample.world_pt.x() << "," << sample.world_pt.y() << "," << sample.world_pt.z() << ")"
+                    << " cam=(" << sample.cam_pt.x() << "," << sample.cam_pt.y() << "," << sample.cam_pt.z() << ")"
+                    << " uv=(" << sample.uv.x << "," << sample.uv.y << ")"
+                    << " rect=(" << sample.square.first.x << "," << sample.square.first.y
+                    << ")-(" << sample.square.second.x << "," << sample.square.second.y << ")"
+                    << " side=" << sample.side_length
+                    << " dist=" << sample.distance
+                    << "]";
+            }
+            RCLCPP_WARN(
+                get_logger(),
+                "Recognizer crop samples:%s",
+                crop_stream.str().c_str());
+        }
+    }
+    if (target_msg->targets.size() >= 3 && filtered.size() <= 1) {
+        std::ostringstream projection_stream;
+        for (const auto& sample : detector.last_rejected_projection_samples) {
+            projection_stream
+                << " [id=" << sample.target_id
+                << " reason=" << sample.reason
+                << " world=(" << sample.world_pt.x() << "," << sample.world_pt.y() << "," << sample.world_pt.z() << ")"
+                << " cam=(" << sample.cam_pt.x() << "," << sample.cam_pt.y() << "," << sample.cam_pt.z() << ")"
+                << " uv=(" << sample.uv.x << "," << sample.uv.y << ")]";
+        }
+        RCLCPP_WARN(
+            get_logger(),
+            "Recognizer filter bottleneck: pc_targets=%zu filtered_in_image=%zu reject(z<=0:%zu,x:%zu,y:%zu,xy:%zu) samples:%s",
+            target_msg->targets.size(),
+            filtered.size(),
+            detector.last_filter_stats.behind_camera,
+            detector.last_filter_stats.x_outside,
+            detector.last_filter_stats.y_outside,
+            detector.last_filter_stats.xy_outside,
+            projection_stream.str().c_str());
+    }
+    if (filtered.size() >= 3 && visual_ok <= 1) {
+        if (get_parameter("dump_weak_frames").as_bool()) {
+            const int dump_every_n = get_parameter("weak_frame_dump_every_n").as_int();
+            if (dump_every_n > 0 && sync_callback_count_ % dump_every_n == 0) {
+                const auto dump_dir = std::filesystem::path(get_parameter("weak_frame_dump_dir").as_string());
+                std::error_code ec;
+                std::filesystem::create_directories(dump_dir, ec);
+                for (size_t i = 0; i < detector.last_jigsaw_images.size(); ++i) {
+                    const auto file = dump_dir / (
+                        "weak_" + std::to_string(img_msg->header.stamp.sec) + "_" +
+                        std::to_string(img_msg->header.stamp.nanosec) + "_" +
+                        std::to_string(i) + ".png");
+                    cv::imwrite(file.string(), detector.last_jigsaw_images[i]);
+                }
+                if (ec) {
+                    RCLCPP_WARN(get_logger(), "Failed to create weak frame dump dir: %s", ec.message().c_str());
+                } else if (!detector.last_jigsaw_images.empty()) {
+                    RCLCPP_INFO(
+                        get_logger(),
+                        "Dumped %zu weak-frame jigsaw images to %s",
+                        detector.last_jigsaw_images.size(),
+                        dump_dir.c_str());
+                }
+            }
+        }
+    }
+
     detected_targets_pub->publish(detected_targets);
     // markers_pub->publish(detector.get_markers(squares, detect_rep, detected_targets));
     annotations_pub->publish(detector.get_annotiations(squares, detected_targets));

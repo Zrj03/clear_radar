@@ -46,6 +46,24 @@ class YOLOv5_1_Decoder : public YOLOv5Decoder {
     virtual bool check_num_outputs(int num_outputs) override;
 };
 
+class YOLOv5FlatDecoder : public NetDecoderBase {
+   protected:
+    struct YOLOv5FlatLayerInfo {
+        int index, num_preds, num_outputs;
+    };
+    std::vector<YOLOv5FlatLayerInfo> layers;
+    std::vector<int> class_color_map;
+    std::vector<int> class_type_map;
+    size_t decode_calls = 0;
+    size_t debug_log_period = 30;
+
+   public:
+    YOLOv5FlatDecoder(toml::value &, const rclcpp::Logger &);
+    virtual void decode(int layer_index, const float *prob, std::vector<Armor> &objects) override;
+    virtual void set_layer_info(int, const std::vector<size_t> &) override;
+    virtual bool check_num_outputs(int num_outputs) override;
+};
+
 class YOLOv8Decoder : public NetDecoderBase {
    protected:
     int NUM_KPTS, NUM_TSIZES;

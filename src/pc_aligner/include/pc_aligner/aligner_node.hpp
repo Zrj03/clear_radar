@@ -12,6 +12,8 @@
 #include <radar_interface/srv/auto_align.hpp>
 
 #include <open3d/Open3D.h>
+#include <Eigen/Dense>
+#include <opencv2/core.hpp>
 
 struct PcSampleContext
 {
@@ -39,6 +41,12 @@ private:
     std::shared_ptr<PcSampleContext> pc_sample_context;
     geometry_msgs::msg::TransformStamped::SharedPtr world_tf, middle_tf;
 
+    // LiDAR-Camera calibration parameters
+    cv::Mat camera_intrinsic;        // 相机内参矩阵 (3x3)
+    cv::Mat camera_distortion;       // 相机畸变系数 (1x5)
+    Eigen::Matrix4d lidar_to_camera; // 外参变换矩阵 (LiDAR -> Camera)
+    bool calibration_loaded = false; // 标定参数是否已加载
+
     // @brief 拿到相机相对雷达的坐标，通过 tf2 对外发布
     // @details 相机相对雷达的坐标通过 ros parameter 获取，由于两者相对位置由物理条件决定，
     //          一般情况不会发生改变，故通过静态广播发布
@@ -62,6 +70,10 @@ private:
     void pub_del_points(unsigned size);
 
     void startup_callback(std::shared_ptr<open3d::geometry::PointCloud> sample_pc);
+    
+    // 标定参数加载相关方法
+    void load_calibration_file(const std::string& calibration_file_path);
+    bool load_calibration_parameters();
 
 public:
     AlignerNode();

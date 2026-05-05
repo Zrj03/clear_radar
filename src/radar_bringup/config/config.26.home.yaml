@@ -1,0 +1,170 @@
+/radar/pc_aligner:
+  ros__parameters:
+    sample_lidar: 'lidar_mid70'
+    # 初始化采样点云数目
+    init_sample: 1000000
+    # 对齐器采样模型点数
+    mesh_sample: 1000000
+    # 对齐器裁剪盒 单位: m（适配场地）
+    crop_box.min: [0., -20., -2.] # [0., 0., -5.]
+    crop_box.max: [28., 20., 3.] #[30., 15., 5.]
+    # 最大对应点距离 单位: m
+    max_corr_dist: 0.5
+    # 最大迭代次数
+    max_iteration: 10
+    # TF 续发周期：缩短缓存边界，降低 extrapolation 风险
+    tf_pub_interval_ms: 100
+    # 质量门槛：最小拟合率
+    quality_gate.min_fitness: 0.70
+    # 启用预选择点
+    use_preselect: False
+    # 启动时手动对齐
+    startup_manual_align: True
+
+    # 手动配准发生在未对齐的雷达坐标系下，保留场地主体并过滤过宽/过高的杂点
+    manual_crop.min: [0., -20., -2.]
+    manual_crop.max: [28., 20., 3.]
+
+    align_model: "mesh"
+    mesh: "home_demo.stl"
+    # STL模型缩放参数（STL单位mm → 目标单位m）
+    mesh_scale: 0.001
+    init_translate: [0.0, 0.0, 0.0]
+
+/radar/pc_detector:
+  ros__parameters:
+    # 缓冲区帧数（时间累计）
+    node.buffer_frame_size: 4
+    node.lidars: ['lidar_mid70']
+
+    mesh.filter_mode: "mesh"
+    mesh.mesh_ori: "home_demo.stl"
+    mesh.mesh_filter: "home_demo.stl"
+    # STL模型缩放参数（STL单位mm → 目标单位m）
+    mesh.scale: 0.001
+    mesh.init_translate: [0.0, 0.0, 0.0]
+
+    # 关闭地图先验，防止室内测试点云被比赛地图先验滤除
+    static_map_prior.enable: false
+
+    # 体素网格滤波器体素大小 单位: m
+    voxel_grid.voxel_size: 0.1
+    # 膨胀的核半径大小 单位: 体素
+    voxel_grid.dilate_size: 1
+    # 体素网格盒大小 单位: m（适配29m×8m场地）
+    voxel_grid.size.min: [0.150, 0.150, 0.]
+    voxel_grid.size.max: [30., 15., 1.500]
+    # 场地模型占用扩展大小 单位: m
+    voxel_grid.occupy_expand: 0.15
+
+    # 跟踪延迟长度 单位: 帧
+    target_map.last_frames: 30
+    # 跟踪 (马氏) 距离阈值
+    target_map.dist_thres: 4.0
+    # # 跟踪合并跟丢阈值 单位: 帧
+    # target_map.combine_limit: 15
+    # # 跟踪合并 (马氏) 距离阈值
+    # target_map.combine_dist: 8.0
+    # 强制合并距离阈值 单位: m（同一车体前后形成两个轨迹时强制合并，≈车长）
+    target_map.force_combine_dist: 1.0
+    # 错误合并判定跟丢阈值 单位: 帧
+    target_map.separate_limit: 8
+    # 跟踪框相接阈值 单位: m
+    target_map.cc_thres: 0.05
+    # 初始跟踪框预设丢失帧计数 单位: 帧
+    target_map.init_lost: 14
+    # 新目标最少点数，抑制点云碎片直接成目标
+    target_map.min_new_target_points: 15
+    # 新目标几何尺寸下限（过滤无法构成整车的碎片簇）
+    target_map.min_new_target_size_x: 0.30
+    target_map.min_new_target_size_y: 0.25
+    target_map.min_new_target_area: 0.15
+    # 新目标最少连续确认帧数，降低短命 ID 抖动
+    target_map.min_new_target_confirmations: 4
+    # 新目标候选允许丢帧间隔（严格：仅允许1帧缺失）
+    target_map.new_target_confirm_max_gap: 1
+    # 新目标候选聚合距离
+    target_map.new_target_candidate_dist: 0.6
+    # 投影后 Z 轴高度 单位: m
+    target_map.project_z: 0.0
+
+    # Z 方向压缩比例
+    clustering.z_zip: 0.5
+    # (普通参数) DBSCAN 聚类算法的聚类半径 单位: m
+    clustering.normal.eps: 0.45
+    # (普通参数) DBSCAN 聚类算法的最少点阈值
+    clustering.normal.min_points: 8
+    # (宽松参数) DBSCAN 聚类算法的聚类半径 单位: m
+    clustering.loose.eps: 0.25
+    # (宽松参数) DBSCAN 聚类算法的最少点阈值
+    clustering.loose.min_points: 6
+    # (宽松参数) 进行宽松聚类的扩展边界 单位: m
+    clustering.loose.box_expand: 0.1
+    # (严格参数) DBSCAN 聚类算法的聚类半径 单位: m
+    clustering.strict.eps: 0.15
+    # (严格参数) DBSCAN 聚类算法的最少点阈值
+    clustering.strict.min_points: 12
+
+    # 预测协方差矩阵
+    kalman_filter.q.position: 0.00005
+    kalman_filter.q.velocity: 0.00002
+    kalman_filter.q.pos_vel: 1.0e-4
+    # 观测协方差矩阵
+    kalman_filter.r.position: 4.0e-2
+    kalman_filter.r.velocity: 1.0e-1
+    # 预测积累协方差更新比率
+    kalman_filter.cov_factor: 1.5
+    # 速度衰减比率
+    kalman_filter.decay_rate: 5.0e-4
+    # 速递限制 单位: m/s
+    kalman_filter.max_velocity: 10.0
+
+/radar/hik_6mm/hik_camera:
+  ros__parameters:
+    # old camera sn: DB0108949
+    # sn: DB0108949
+    # 留空表示使用当前接入的第一台相机（更换相机时无需改 SN）
+    sn: ""
+    camera_info_url: "package://hik_camera/config/6mm.yaml"
+    exposure_time: 16000.0
+    gain: 23.0
+    digital_shift: 1.0
+    frame_rate: 60.0
+    use_sensor_data_qos: false
+
+/radar/hik_6mm/img_recognizer:
+  ros__parameters:
+    sync_queue_size: 12
+    sync_max_interval: 0.5
+    crop_side_length: 2200.0
+    # 负值表示将点云投影裁剪框向图像下方移动
+    crop_center_up_bias_ratio: 0.00
+    crop_center_right_bias_ratio: 0.0
+    img_compressed: False
+    jigsaw_size: 3
+    img_size: 640
+    armor_detector_config: "models/armor.toml"
+    enable_imshow: True
+    dump_weak_frames: false
+
+/radar/matcher:
+  ros__parameters:
+    img_ns: ['/radar/hik_6mm']
+    uncertainty_limit: 40
+
+/radar/nn_detector:
+  ros__parameters:
+    armor_detector_config: "models/armor.toml"
+    enable_imshow: true
+    debug: false
+
+/radar/judge_bridge:
+  ros__parameters:
+    enable_recorder: True
+
+
+/radar/lidar_mid70/livox_v1_lidar:
+  ros__parameters:
+    local_ip: '192.168.1.50'
+    dest_ip: '192.168.1.136'
+    udp_port: 50010

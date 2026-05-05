@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Eigen/Core>
+#include <cmath>
 #include <open3d/Open3D.h>
 #include <open3d/t/geometry/RaycastingScene.h>
 
@@ -34,10 +35,11 @@ struct Z_Map {
         , grid_size(((grid_max - grid_min) / voxel_size + Eigen::Vector3d::Ones()).cast<int>())
         , z_map(Eigen::MatrixXf::Zero(grid_size[0], grid_size[1]))
     {
+        double z_min = bbox.min_bound_(2);
         double z_max = bbox.max_bound_(2);
         open3d::t::geometry::RaycastingScene scene_r;
         scene_r.AddTriangles(open3d::t::geometry::TriangleMesh::FromLegacy(*mesh));
-        z_map = Eigen::MatrixXf::Zero(grid_size[0], grid_size[1]);
+        z_map = Eigen::MatrixXf::Constant(grid_size[0], grid_size[1], static_cast<float>(z_min));
         Eigen::MatrixXf Q(grid_size[0] * grid_size[1], 6); // 查询光线
         for (int i = 0; i < grid_size[0]; ++i) {
             for (int j = 0; j < grid_size[1]; ++j) {
@@ -51,7 +53,18 @@ struct Z_Map {
         open3d::core::Tensor rslt_hit = rslt_r["t_hit"];
         for (int i = 0; i < grid_size[0]; ++i)
             for (int j = 0; j < grid_size[1]; ++j) {
-                z_map(i, j) = z_max - rslt_hit[i * grid_size[1] + j].Item<float>();
+                const float t_hit = rslt_hit[i * grid_size[1] + j].Item<float>();
+                double z = z_min;
+                if (std::isfinite(t_hit)) {
+                    z = z_max - static_cast<double>(t_hit);
+                    if (!std::isfinite(z))
+                        z = z_min;
+                    else if (z < z_min)
+                        z = z_min;
+                    else if (z > z_max)
+                        z = z_max;
+                }
+                z_map(i, j) = static_cast<float>(z);
             }
     }
     Eigen::Vector3d project_ground(const Eigen::Vector2d& pt) const

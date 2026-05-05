@@ -6,19 +6,53 @@
 std::vector<TargetDetector::Target> TargetDetector::filter_targets(const cv::Point2i& img_size, const TargetArray::ConstSharedPtr& msg)
 {
     std::vector<TargetDetector::Target> rtn;
+    last_filter_stats = {};
+    last_rejected_projection_samples.clear();
+    last_filter_stats.total = msg->targets.size();
     constexpr double BORDER_MARGIN_RATIO = 0.5;
     const double x_min = -img_size.x * BORDER_MARGIN_RATIO;
     const double y_min = -img_size.y * BORDER_MARGIN_RATIO;
     const double x_max = img_size.x * (1.0 + BORDER_MARGIN_RATIO);
     const double y_max = img_size.y * (1.0 + BORDER_MARGIN_RATIO);
+    auto add_projection_sample = [&](const Target& target, const Eigen::Vector3d& world_pt,
+                                     const Eigen::Vector3d& cam_pt, const cv::Point2d& uv,
+                                     const char* reason) {
+        constexpr size_t MAX_PROJECTION_SAMPLES = 4;
+        if (last_rejected_projection_samples.size() >= MAX_PROJECTION_SAMPLES)
+            return;
+        last_rejected_projection_samples.push_back({
+            static_cast<int64_t>(target.id),
+            world_pt,
+            cam_pt,
+            uv,
+            reason,
+        });
+    };
     for (auto& target : msg->targets) {
-        Eigen::Vector3d cam_pt3_eigen = trans * Eigen::Vector3d(target.position[0], target.position[1], target.calc_z);
-        if (cam_pt3_eigen.z() <= 0)
+        Eigen::Vector3d world_pt(target.position[0], target.position[1], target.calc_z);
+        Eigen::Vector3d cam_pt3_eigen = trans * world_pt;
+        if (cam_pt3_eigen.z() <= 0) {
+            ++last_filter_stats.behind_camera;
+            add_projection_sample(target, world_pt, cam_pt3_eigen, {}, "z<=0");
             continue;
+        }
         cv::Point3d cam_pt3(cam_pt3_eigen.x(), cam_pt3_eigen.y(), cam_pt3_eigen.z());
         cv::Point2d cam_pt2 = project_func(cam_pt3);
-        if (cam_pt2.x >= x_min && cam_pt2.y >= y_min && cam_pt2.x < x_max && cam_pt2.y < y_max)
+        const bool x_inside = cam_pt2.x >= x_min && cam_pt2.x < x_max;
+        const bool y_inside = cam_pt2.y >= y_min && cam_pt2.y < y_max;
+        if (x_inside && y_inside) {
             rtn.emplace_back(target);
+            ++last_filter_stats.kept;
+            continue;
+        }
+        if (!x_inside && !y_inside)
+            ++last_filter_stats.xy_outside;
+        else if (!x_inside)
+            ++last_filter_stats.x_outside;
+        else
+            ++last_filter_stats.y_outside;
+        add_projection_sample(target, world_pt, cam_pt3_eigen, cam_pt2,
+            (!x_inside && !y_inside) ? "xy" : (!x_inside ? "x" : "y"));
     }
     return rtn;
 }
@@ -58,15 +92,34 @@ cv::Mat TargetDetector::get_jigsaw_img(const cv::Mat& img, const std::vector<Squ
 std::vector<TargetDetector::Square> TargetDetector::get_squares(const std::vector<Target>& targets)
 {
     double side_length_k = node->get_parameter("crop_side_length").as_double();
+    double up_bias_ratio = node->get_parameter("crop_center_up_bias_ratio").as_double();
+    double right_bias_ratio = node->get_parameter("crop_center_right_bias_ratio").as_double();
     std::vector<Square> squares;
+    last_crop_samples.clear();
     for (const auto& target : targets) {
-        Eigen::Vector3d cam_pt3_eigen = trans * Eigen::Vector3d(target.position[0], target.position[1], target.calc_z);
+        Eigen::Vector3d world_pt(target.position[0], target.position[1], target.calc_z);
+        Eigen::Vector3d cam_pt3_eigen = trans * world_pt;
         cv::Point3d cam_pt3(cam_pt3_eigen.x(), cam_pt3_eigen.y(), cam_pt3_eigen.z());
         cv::Point2d cam_pt2 = project_func(cam_pt3);
-        double side_length = side_length_k / std::sqrt(cam_pt3.x * cam_pt3.x + cam_pt3.y * cam_pt3.y + cam_pt3.z * cam_pt3.z);
-        Square square { cv::Point2d(cam_pt2.x - side_length / 2, cam_pt2.y - side_length / 2),
-            cv::Point2d(cam_pt2.x + side_length / 2, cam_pt2.y + side_length / 2) };
+        double distance = std::sqrt(cam_pt3.x * cam_pt3.x + cam_pt3.y * cam_pt3.y + cam_pt3.z * cam_pt3.z);
+        double side_length = side_length_k / distance;
+        const double center_x = cam_pt2.x + side_length * right_bias_ratio;
+        const double center_y = cam_pt2.y - side_length * up_bias_ratio;
+        Square square { cv::Point2d(center_x - side_length / 2, center_y - side_length / 2),
+            cv::Point2d(center_x + side_length / 2, center_y + side_length / 2) };
         squares.push_back(square);
+        constexpr size_t MAX_CROP_SAMPLES = 6;
+        if (last_crop_samples.size() < MAX_CROP_SAMPLES) {
+            last_crop_samples.push_back({
+                static_cast<int64_t>(target.id),
+                world_pt,
+                cam_pt3_eigen,
+                cam_pt2,
+                square,
+                side_length,
+                distance,
+            });
+        }
     }
     return squares;
 }
@@ -74,22 +127,29 @@ std::vector<TargetDetector::Square> TargetDetector::get_squares(const std::vecto
 TargetDetector::DetectRepArray TargetDetector::detect(const Image::ConstSharedPtr& img_msg, const std::vector<Square>& squares)
 {
     cv::Mat img = cv_bridge::toCvShare(img_msg, "bgr8")->image;
+    last_jigsaw_images.clear();
     // 我好想用 C++20 阿啊啊啊啊
     std::vector<Square> one_jigsaw;
     DetectRepArray detect_rep;
     for (const auto& square : squares) {
         if (one_jigsaw.size() == jigsaw_size * jigsaw_size) {
-            detect_rep.push_back(detect_func(get_jigsaw_img(img, one_jigsaw)));
+            cv::Mat jigsaw = get_jigsaw_img(img, one_jigsaw);
+            last_jigsaw_images.push_back(jigsaw.clone());
+            detect_rep.push_back(detect_func(jigsaw));
             one_jigsaw.clear();
         }
         one_jigsaw.push_back(square);
     }
-    if (!one_jigsaw.empty())
-        detect_rep.push_back(detect_func(get_jigsaw_img(img, one_jigsaw)));
+    if (!one_jigsaw.empty()) {
+        cv::Mat jigsaw = get_jigsaw_img(img, one_jigsaw);
+        last_jigsaw_images.push_back(jigsaw.clone());
+        detect_rep.push_back(detect_func(jigsaw));
+    }
     return detect_rep;
 }
 
-TargetDetector::DetectedTargetArray TargetDetector::get_detected_targets(const std_msgs::msg::Header& header, const std::vector<Target>& targets, const std::vector<Square>& squares, DetectRepArray& detect_rep)
+TargetDetector::DetectedTargetArray TargetDetector::get_detected_targets(const std_msgs::msg::Header& header, const std::vector<Target>& targets, const std::vector<Square>& squares, DetectRepArray& detect_rep,
+    uint32_t img_width, uint32_t img_height)
 {
     // NOTE: 这里会将 armor 的角点转换到相机坐标系下
     assert(targets.size() == squares.size());
@@ -131,7 +191,9 @@ TargetDetector::DetectedTargetArray TargetDetector::get_detected_targets(const s
                 };
                 for (auto& pt : target.pts) {
                     auto pt_cv = to_real(to_jig_coord({ pt.x, pt.y }));
-                    pt.x = pt_cv.x, pt.y = pt_cv.y;
+                    // pt.x = pt_cv.x, pt.y = pt_cv.y;
+                    pt.x = std::max(0.0, std::min(pt_cv.x, static_cast<double>(img_width - 1)));
+                    pt.y = std::max(0.0, std::min(pt_cv.y, static_cast<double>(img_height - 1)));
                 }
 
                 double dist_sqr = (target.xywh[0] - square_centre.x) * (target.xywh[0] - square_centre.x) + (target.xywh[1] - square_centre.y) * (target.xywh[1] - square_centre.y);
@@ -274,7 +336,63 @@ foxglove_msgs::msg::ImageAnnotations TargetDetector::get_annotiations(const std:
 {
     assert(squares.size() == detected_targets.targets.size());
     foxglove_msgs::msg::ImageAnnotations annotations;
+    annotations.timestamp = detected_targets.header.stamp;
     for (unsigned i = 0; i < squares.size(); ++i) {
+        const auto& square = squares[i];
+        const auto center_x = (square.first.x + square.second.x) * 0.5;
+        const auto center_y = (square.first.y + square.second.y) * 0.5;
+        const auto width = std::max(1.0, square.second.x - square.first.x);
+        const auto height = std::max(1.0, square.second.y - square.first.y);
+
+        foxglove_msgs::msg::Color outline_color;
+        foxglove_msgs::msg::Color fill_color;
+        outline_color.a = 1.0;
+        fill_color.a = 0.0;
+        switch (detected_targets.targets[i].color) {
+        case radar_interface::msg::Armor::COLOR_RED:
+            outline_color.r = 1.0;
+            break;
+        case radar_interface::msg::Armor::COLOR_BLUE:
+            outline_color.b = 1.0;
+            break;
+        case radar_interface::msg::Armor::COLOR_PURPLE:
+            outline_color.r = 1.0;
+            outline_color.b = 1.0;
+            break;
+        default:
+            outline_color.r = 1.0;
+            outline_color.g = 1.0;
+            outline_color.b = 0.0;
+            break;
+        }
+
+        foxglove_msgs::msg::PointsAnnotation square_annotation;
+        square_annotation.timestamp = detected_targets.header.stamp;
+        square_annotation.type = foxglove_msgs::msg::PointsAnnotation::LINE_LOOP;
+        square_annotation.thickness = 2.0;
+        square_annotation.outline_color = outline_color;
+        square_annotation.fill_color = fill_color;
+        square_annotation.points.resize(4);
+        square_annotation.points[0].x = square.first.x;
+        square_annotation.points[0].y = square.first.y;
+        square_annotation.points[1].x = square.second.x;
+        square_annotation.points[1].y = square.first.y;
+        square_annotation.points[2].x = square.second.x;
+        square_annotation.points[2].y = square.second.y;
+        square_annotation.points[3].x = square.first.x;
+        square_annotation.points[3].y = square.second.y;
+        annotations.points.push_back(square_annotation);
+
+        foxglove_msgs::msg::CircleAnnotation center_annotation;
+        center_annotation.timestamp = detected_targets.header.stamp;
+        center_annotation.position.x = center_x;
+        center_annotation.position.y = center_y;
+        center_annotation.diameter = std::min(width, height) * 0.12;
+        center_annotation.thickness = 2.0;
+        center_annotation.fill_color = fill_color;
+        center_annotation.outline_color = outline_color;
+        annotations.circles.push_back(center_annotation);
+
         if (detected_targets.targets[i].type == radar_interface::msg::Armor::TYPE_0 || 
             detected_targets.targets[i].type == radar_interface::msg::Armor::TYPE_SENTRY) {
             continue;
@@ -342,8 +460,8 @@ foxglove_msgs::msg::ImageAnnotations TargetDetector::get_annotiations(const std:
             annotation.text += "UNKNOWN";
             break;
         }
-        annotation.position.x = squares[i].first.x;
-        annotation.position.y = squares[i].first.y - 15;
+        annotation.position.x = square.first.x;
+        annotation.position.y = square.first.y - 15;
         annotation.text_color.r = 1.0;
         annotation.text_color.g = 1.0;
         annotation.text_color.b = 1.0;

@@ -11,12 +11,12 @@ from launch import LaunchDescription
 import numpy as np
 import os
 
-debug = False
+debug = True
 
 node_params = os.path.join(
     get_package_share_directory('radar_bringup'),
     'config',
-    'config.24.home.yaml'
+    'config.24.regional.yaml'
 )
 
 
@@ -26,6 +26,7 @@ def get_xyzw_tf_broadcaster(cali: list, fr: str, child_fr: str):
         executable='static_transform_publisher',
         namespace='radar',
         name=fr+'_to_'+child_fr,
+        parameters=[{'use_sim_time': True}],
         arguments=['--x', str(cali[0]),
                    '--y', str(cali[1]),
                    '--z', str(cali[2]),
@@ -44,6 +45,7 @@ def get_matrix_tf_broadcaster(cali: np.array, fr: str, child_fr: str):
         executable='static_transform_publisher',
         namespace='radar',
         name=fr+'_to_'+child_fr,
+        parameters=[{'use_sim_time': True}],
         arguments=['--x', str(trans[0]),
                    '--y', str(trans[1]),
                    '--z', str(trans[2]),
@@ -62,18 +64,19 @@ def get_vision_container(cam_name: str, sn: str, camera_info_url: str):
             namespace='radar',
             package='rclcpp_components',
             executable='component_container_isolated',
+            arguments=['--use_multi_threaded_executor'],
             composable_node_descriptions=[
-                ComposableNode(
-                    package='hik_camera',
-                    plugin='hik_camera::HikCameraNode',
-                    name='hik_camera',
-                    namespace='radar/' + cam_name,
-                    parameters=[{
-                        'camera_info_url': camera_info_url,
-                        'sn': sn
-                    }],
-                    extra_arguments=[{'use_intra_process_comms': True}]
-                ),
+                # ComposableNode(
+                #     package='hik_camera',
+                #     plugin='hik_camera::HikCameraNode',
+                #     name='hik_camera',
+                #     namespace='radar/' + cam_name,
+                #     parameters=[{
+                #         'camera_info_url': camera_info_url,
+                #         'sn': sn
+                #     }],
+                #     extra_arguments=[{'use_intra_process_comms': True}]
+                # ),
                 ComposableNode(
                     package='img_recognizer',
                     plugin='img_recognizer::RecognizerNode',
@@ -88,22 +91,36 @@ def get_vision_container(cam_name: str, sn: str, camera_info_url: str):
             on_exit=Shutdown(),
         ),)
     else:
-        return (Node(
+        return (
+            # Node(
+            #     package='hik_camera',
+            #     executable='hik_camera_node',
+            #     namespace='radar/' + cam_name,
+            #     parameters=[node_params, {
+            #         'camera_info_url': camera_info_url,
+            #         'sn': sn
+            #     }],
+            # ),
+            Node(
                 package='hik_camera',
-                executable='hik_camera_node',
+                executable='info_pub',
                 namespace='radar/' + cam_name,
-                parameters=[node_params, {
-                    'camera_info_url': camera_info_url,
-                    'sn': sn
-                }],
-                ),
-                Node(
+                parameters=[
+                    {'camera_info_url': camera_info_url,
+                     'use_sim_time': True},
+                    node_params,
+                ],
+            ),
+            Node(
                 package='img_recognizer',
                 executable='img_recognizer_node',
                 namespace='radar/' + cam_name,
-                parameters=[node_params],
-                ),
-                )
+                parameters=[node_params,
+                            {'use_sim_time': True,
+                             'enable_imshow': True,
+                             'img_compressed': True}],
+            ),
+        )
 
 
 def get_pc_container():
@@ -113,21 +130,23 @@ def get_pc_container():
             namespace='radar',
             package='rclcpp_components',
             executable='component_container_isolated',
+            arguments=['--use_multi_threaded_executor'],
             composable_node_descriptions=[
-                ComposableNode(
-                    package='livox_v1_lidar',
-                    plugin='livox_v1_lidar::LidarPublisher',
-                    name='livox_v1_lidar',
-                    namespace='radar/' + 'lidar_mid70',
-                    parameters=[node_params],
-                    extra_arguments=[{'use_intra_process_comms': True}]
-                ),
+                # ComposableNode(
+                #     package='livox_v1_lidar',
+                #     plugin='livox_v1_lidar::LidarPublisher',
+                #     name='livox_v1_lidar',
+                #     namespace='radar/' + 'lidar_mid70',
+                #     parameters=[node_params],
+                #     extra_arguments=[{'use_intra_process_comms': True}]
+                # ),
                 ComposableNode(
                     package='pc_detector',
                     plugin='pc_detector::DetectorNode',
                     name='pc_detector',
                     namespace='radar',
-                    parameters=[node_params],
+                    parameters=[node_params,
+                                {'use_sim_time': True}],
                     extra_arguments=[{'use_intra_process_comms': True}]
                 ),
             ],
@@ -137,25 +156,27 @@ def get_pc_container():
         ),)
     else:
         return (
-            Node(
-                package='livox_v1_lidar',
-                executable='livox_v1_lidar_node',
-                name='livox_v1_lidar',
-                namespace='radar/' + 'lidar_mid70',
-                parameters=[node_params],
-            ),
+            # Node(
+            #     package='livox_v1_lidar',
+            #     executable='livox_v1_lidar_node',
+            #     name='livox_v1_lidar',
+            #     namespace='radar/' + 'lidar_mid70',
+            #     parameters=[node_params],
+            # ),
             Node(
                 package='pc_detector',
                 executable='pc_detector_node',
                 name='pc_detector',
                 namespace='radar',
-                parameters=[node_params],
+                parameters=[node_params,
+                            {'use_sim_time': True}],
             ),
         )
 
 
 def generate_launch_description():
     return LaunchDescription([
+        
         *get_vision_container(
             'hik_6mm', 'DA8184809', 'package://hik_camera/config/6mm.yaml'),
         get_xyzw_tf_broadcaster(
@@ -179,49 +200,56 @@ def generate_launch_description():
             package='radar_utils',
             executable='marker_pub',
             namespace='radar',
-            parameters=[{"mesh": "24_bg2align_fix1.stl"}],
+            parameters=[{"mesh": "rm_2026_19M.stl"}],
             output='both',
         ),
         Node(
             package='pc_aligner',
             executable='pc_aligner',
             namespace='radar',
-            parameters=[node_params],
+            parameters=[node_params,
+                        {'use_sim_time': True}],
             output='both',
         ),
         Node(
             package='target_matcher',
             executable='target_matcher',
             namespace='radar',
-            parameters=[node_params],
+            parameters=[node_params,
+                        {'use_sim_time': True}],
             output='both',
         ),
         # Node(
         #     package='target_multiplexer',
         #     executable='target_multiplexer',
         #     namespace='radar',
-        #     parameters=[node_params],
+        #     parameters=[node_params,
+        #                 {'use_sim_time': True}],
         #     output='both',
         # ),
         Node(
             package='dv_trigger',
             executable='dv_trigger',
             namespace='radar',
-            parameters=[node_params],
+            parameters=[node_params,
+                        {'use_sim_time': True}],
             output='both',
         ),
         Node(
             package='radar_supervisor',
             executable='radar_supervisor',
             namespace='radar',
-            parameters=[node_params],
+            parameters=[node_params,
+                        {'use_sim_time': True}],
             output='both',
         ),
         Node(
             package='judge_bridge',
             executable='judge_bridge',
+            name='judge_bridge',
             namespace='radar',
-            parameters=[node_params],
+            parameters=[node_params,
+                        {'use_sim_time': True}],
             output='both',
         ),
         Node(
@@ -240,4 +268,9 @@ def generate_launch_description():
             namespace='radar',
             output='both',
         ),
+        # actions.ExecuteProcess(
+        #     cmd=['ros2', 'bag', 'play', 'rosbag2_2024_05_31-20_44_54',
+        #          '--clock', '--remap', '/tf:=/tf_back', '/tf_static:=/tf_static_back'],
+        #     output='screen'
+        # )
     ])

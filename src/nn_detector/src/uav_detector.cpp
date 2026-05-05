@@ -1,6 +1,10 @@
 #include <detector/uav_detector.h>
 #include <pcl/common/transforms.h>
 #include <pcl/common/centroid.h>
+#include <pcl/common/point_tests.h>
+#include <cmath>
+
+#include <rclcpp/clock.hpp>
 
 namespace nn_detector
 {
@@ -13,6 +17,21 @@ void UAVDetector::detect(const sensor_msgs::msg::PointCloud2::SharedPtr msg,
                          pcl::PointCloud<pcl::PointXYZ>& other_accumulated_cloud_out,
                          geometry_msgs::msg::Point& uav_position)
 {
+    static rclcpp::Clock steady_clock(RCL_STEADY_TIME);
+    if (!msg) {
+        RCLCPP_WARN_THROTTLE(logger_, steady_clock, 2000, "Null point cloud message, skip UAV detection");
+        return;
+    }
+
+    const auto point_count = static_cast<size_t>(msg->width) * static_cast<size_t>(msg->height);
+    if (point_count == 0 || msg->data.empty()) {
+        RCLCPP_WARN_THROTTLE(
+            logger_, steady_clock, 2000,
+            "Empty point cloud frame (width=%u height=%u data=%zu), skip UAV detection",
+            msg->width, msg->height, msg->data.size());
+        return;
+    }
+
     // 初始化告警状态，0表示未检测到
     lidar_detect.dart_state = 0;
     lidar_detect.fly_state = 0;
@@ -53,18 +72,27 @@ void UAVDetector::detect(const sensor_msgs::msg::PointCloud2::SharedPtr msg,
 
     // 使用Eigen进行点云坐标变换
     Eigen::Affine3d transform_eigen = tf2::transformToEigen(transform_stamped);
+    if (!transform_eigen.matrix().allFinite()) {
+        RCLCPP_ERROR(logger_, "Invalid TF matrix (NaN/Inf), skip this frame");
+        return;
+    }
+
     pcl::PointCloud<pcl::PointXYZ> transformed_cloud;
     pcl::transformPointCloud(receive_cloud, transformed_cloud, transform_eigen);
 
     // 过滤出关注区域的点，用于后续累积和检测
     pcl::PointCloud<pcl::PointXYZ> other_filtered_cloud;
-    for (const auto& point : transformed_cloud.points) {
+    for (const auto& point : transformed_cloud.points)
+    {
+        if (!pcl::isFinite(point))
+            continue;
+
         if (// ((point.x > 28 - 0.5889 - 0.1885 && point.x < 28 - 0.5889) &&  // 飞镖靶区（已禁用）
             //  (point.y > 3.925 && point.y < 4.525) &&
             //  (point.z > 2.4722 - 0.859 + 0.1 && point.z < 2.4722)) ||
             ((point.x > 13 && point.x < 27.5) &&
              (point.y > 0.2 && point.y < 1.356 + 2.4 + 0.8) &&
-             (point.z > 1.7 && point.z < 3))) {
+             (point.z > 1.7 && point.z < 3))){
             other_filtered_cloud.push_back(point);
         }
     }
@@ -76,7 +104,8 @@ void UAVDetector::detect(const sensor_msgs::msg::PointCloud2::SharedPtr msg,
     // pcl::PointCloud<pcl::PointXYZ> dart_cloud;  // 飞镖检测已禁用
     pcl::PointCloud<pcl::PointXYZ> fly_cloud;
 
-    for (auto& point : other_accumulated_cloud_out.points) {
+    for (auto& point : other_accumulated_cloud_out.points)
+    {
         // if (dart_cloud_filter(point)) dart_cloud.push_back(point);  // 飞镖检测已禁用
         if (fly_filter(point))        fly_cloud.push_back(point);
     }
@@ -85,12 +114,14 @@ void UAVDetector::detect(const sensor_msgs::msg::PointCloud2::SharedPtr msg,
     // if (dart_cloud.size() > 5) {  // 飞镖检测已禁用
     //     lidar_detect.dart_state = 1;
     // }
-    if (fly_cloud.size() > 40) {
+    if (fly_cloud.size() > 40)
+    {
         lidar_detect.fly_state = 1;
     }
 
     // 计算目标位置（质心）
-    if (lidar_detect.fly_state > 0 && !fly_cloud.empty()) {
+    if (lidar_detect.fly_state > 0 && !fly_cloud.empty())
+    {
         Eigen::Vector4f centroid;
         pcl::compute3DCentroid(fly_cloud, centroid);
         uav_position.x = centroid[0];

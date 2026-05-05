@@ -25,6 +25,7 @@ setup(
             'marker_pub = radar_utils.marker_pub:main',
             'selector = radar_utils.selector:main',
             'compressed_image_restamper = radar_utils.compressed_image_restamper:main',
+            'camera_param_tuner = radar_utils.camera_param_tuner:main',
         ],
     },
 )

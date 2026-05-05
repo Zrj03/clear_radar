@@ -209,10 +209,10 @@ void DetectorNode::pub_targets(const rclcpp::Time& time)
     radar_interface::msg::TargetArray target_array;
     target_array.header.frame_id.assign("world");
     target_array.header.stamp = time;
-    marker_array.markers.reserve(target_map.target_map.size() * 2);
+    marker_array.markers.reserve(target_map.target_map.size() * 4);
     for (const auto& [id, target] : target_map.target_map) {
         visualization_msgs::msg::Marker marker_sphere_rel, marker_sphere_kalman;
-        visualization_msgs::msg::Marker marker_text;
+        visualization_msgs::msg::Marker marker_center_sphere;
         radar_interface::msg::Target target_msg;
         float size = 0.2;
         {
@@ -259,26 +259,27 @@ void DetectorNode::pub_targets(const rclcpp::Time& time)
             marker_sphere_kalman.color.b = 1.0;
             marker_sphere_kalman.lifetime = rclcpp::Duration::from_seconds(0.1);
         }{
-            marker_text.header.frame_id.assign("world");
-            marker_text.header.stamp = time;
-            marker_text.ns = "text";
-            marker_text.id = id * 2 + 2;
-            marker_text.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-            marker_text.action = visualization_msgs::msg::Marker::MODIFY; // ADD
-            marker_text.scale.z = 0.3;
-            marker_text.pose.position.x = target.grav(0);
-            marker_text.pose.position.y = target.grav(1);
-            marker_text.pose.position.z = target.grav(2);
-            marker_text.pose.orientation.w = 1.;
-            marker_text.pose.orientation.x = 0.;
-            marker_text.pose.orientation.y = 0.;
-            marker_text.pose.orientation.z = 0.;
-            marker_text.color.a = 0.8;
-            marker_text.color.r = 1.0;
-            marker_text.color.g = 1.0;
-            marker_text.color.b = 1.0;
-            marker_text.text = "id: " + std::to_string(id);
-            marker_text.lifetime = rclcpp::Duration::from_seconds(0.1);
+            auto pos = target.pos();
+            marker_center_sphere.header.frame_id.assign("world");
+            marker_center_sphere.header.stamp = time;
+            marker_center_sphere.ns = "cluster_center";
+            marker_center_sphere.id = id;
+            marker_center_sphere.type = visualization_msgs::msg::Marker::SPHERE;
+            marker_center_sphere.scale.x = 0.18;
+            marker_center_sphere.scale.y = 0.18;
+            marker_center_sphere.scale.z = 0.18;
+            marker_center_sphere.pose.position.x = pos(0);
+            marker_center_sphere.pose.position.y = pos(1);
+            marker_center_sphere.pose.position.z = pos(2) + get_parameter("target_map.project_z").as_double();
+            marker_center_sphere.pose.orientation.w = 1.;
+            marker_center_sphere.pose.orientation.x = 0.;
+            marker_center_sphere.pose.orientation.y = 0.;
+            marker_center_sphere.pose.orientation.z = 0.;
+            marker_center_sphere.color.a = 0.8;
+            marker_center_sphere.color.r = 1.0;
+            marker_center_sphere.color.g = 1.0;
+            marker_center_sphere.color.b = 0.0;
+            marker_center_sphere.lifetime = rclcpp::Duration::from_seconds(0.1);
         }{
             target_msg.id = id;
             // target_msg.position.x = target.grav(0);
@@ -303,10 +304,11 @@ void DetectorNode::pub_targets(const rclcpp::Time& time)
             target_msg.uncertainty = target.lost_time;
         }
         marker_sphere_rel.action = visualization_msgs::msg::Marker::MODIFY; // ADD
-        marker_text.action = visualization_msgs::msg::Marker::MODIFY; // ADD
+        marker_sphere_kalman.action = visualization_msgs::msg::Marker::MODIFY; // ADD
+        marker_center_sphere.action = visualization_msgs::msg::Marker::MODIFY; // ADD
         marker_array.markers.push_back(marker_sphere_rel);
         marker_array.markers.push_back(marker_sphere_kalman);
-        marker_array.markers.push_back(marker_text);
+        marker_array.markers.push_back(marker_center_sphere);
         target_array.targets.push_back(target_msg);
     }
     marker_publisher->publish(marker_array);

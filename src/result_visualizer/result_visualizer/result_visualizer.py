@@ -27,7 +27,6 @@ configs = {
 # uint32 uncertainty
 
 class ResultVisualizer(Node):
-    team_color = True    # False: Blue, True: Red
     mark = [0., 0., 0., 0., 0., 0.]
 
     def __init__(self):
@@ -35,7 +34,10 @@ class ResultVisualizer(Node):
         self.declare_parameter('im_show', True)
         self.declare_parameter('show_ally', True)
         self.declare_parameter('show_enemy', True)
+        self.declare_parameter('default_team_color', 'red')
         self.get_logger().info('Initializing result_visualizer...')
+        default_team_color = str(self.get_parameter('default_team_color').value).strip().lower()
+        self.team_color = default_team_color != 'blue'
         self.ori_img = cv2.imread(os.path.join(get_package_share_directory('radar_bringup'), 'resource', 'RM2026-1.png'))
         self.bridge = None
         self.cv_bridge_disabled = False
@@ -110,16 +112,15 @@ class ResultVisualizer(Node):
                 color = (0, 0, 255) if is_red else (255, 0, 0)
                 # 我方和敌方都使用对应颜色的实心圆圈
                 cv2.circle(now_img, (im_x, im_y), 20, color, -1)
-                # 只有非0号才显示
-                if num != 0:
-                    cv2.putText(now_img, str(num), (im_x - 10, im_y + 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                    if is_red and not self.team_color and num < len(self.mark):
-                        cv2.putText(now_img, f"{self.mark[num]}/120", (im_x - 20, im_y + 40),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                    if not is_red and self.team_color and num < len(self.mark):
-                        cv2.putText(now_img, f"{self.mark[num]}/120", (im_x - 20, im_y + 40),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                # 绘制序号和进度
+                cv2.putText(now_img, str(num), (im_x - 10, im_y + 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                if is_red and not self.team_color and num < len(self.mark):
+                    cv2.putText(now_img, f"{self.mark[num]}/120", (im_x - 20, im_y + 40),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                if not is_red and self.team_color and num < len(self.mark):
+                    cv2.putText(now_img, f"{self.mark[num]}/120", (im_x - 20, im_y + 40),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
             except IndexError as e:
                 self.get_logger().error(f"Error in drawing: {e}")
 

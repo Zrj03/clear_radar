@@ -18,17 +18,25 @@ bool MultiplexerNode::has_nearby_detection(const radar_interface::msg::MapRobotD
     return false;
 }
 
-uint16_t MultiplexerNode::get_map_id(unsigned ori_id, team_color color_)
+uint16_t MultiplexerNode::get_robot_id(unsigned ori_id, bool target_is_blue)
 {
     constexpr uint16_t id_map[6] = { 7, 1, 2, 3, 4, 5 };
-    switch (color_) {
-    case team_color::C_BLUE:
-        return id_map[ori_id];
-    case team_color::C_RED:
-        return id_map[ori_id] + 100;
-    default:
-        return -1;
-    }
+    return target_is_blue ? static_cast<uint16_t>(id_map[ori_id] + 100) : id_map[ori_id];
+}
+
+bool MultiplexerNode::is_enemy_slot(int slot_idx) const
+{
+    const bool slot_is_blue = slot_idx >= robot_num_per_team;
+    return color == team_color::C_RED ? slot_is_blue : !slot_is_blue;
+}
+
+radar_interface::msg::MatchedTarget MultiplexerNode::get_match_for_slot(int slot_idx) const
+{
+    const int team_idx = slot_idx % robot_num_per_team;
+    const bool slot_is_blue = slot_idx >= robot_num_per_team;
+    if (slot_is_blue)
+        return last_match_result.blue[team_idx];
+    return last_match_result.red[team_idx];
 }
 
 void MultiplexerNode::multiplexer()
@@ -53,34 +61,27 @@ void MultiplexerNode::multiplexer()
 
     int redo_idx = -1;
 redo:
+    const int team_idx = send_idx % robot_num_per_team;
+    const bool target_is_blue = send_idx >= robot_num_per_team;
+    const bool enemy_slot = is_enemy_slot(send_idx);
+
     if (redo_idx == send_idx) {
         // 轮了一遍没的发就退出
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "Cannot multiplex output");
-        if (full_high_light[send_idx] == FULL_HIGHLIGHT_STATUS::HIGHLIGHT)  // 避免因为满高亮而不发送数据
-            full_high_light[send_idx] = FULL_HIGHLIGHT_STATUS::SKIPPED;
+        if (enemy_slot && full_high_light[team_idx] == FULL_HIGHLIGHT_STATUS::HIGHLIGHT)  // 避免因为满高亮而不发送数据
+            full_high_light[team_idx] = FULL_HIGHLIGHT_STATUS::SKIPPED;
         else
             return;
     }
 
     radar_interface::msg::MapRobotData msg;
-    msg.target_robot_id = get_map_id(send_idx, color);
     const auto now = this->now();
     const auto detected_hold_ns = static_cast<int64_t>(get_parameter("detected_hold_sec").as_double() * 1e9);
     const double hold_guard_dist = get_parameter("hold_guard_dist").as_double();
     const double hold_guard_dist_sqr = hold_guard_dist * hold_guard_dist;
 
-    radar_interface::msg::MatchedTarget last_match;
-    switch (color) {
-    case radar_interface::team_color::C_BLUE:
-        last_match = last_match_result.red[send_idx];
-        break;
-    case radar_interface::team_color::C_RED:
-        last_match = last_match_result.blue[send_idx];
-        break;
-    default:
-        RCLCPP_WARN(get_logger(), "Unknown color!");
-        return;
-    }
+    auto last_match = get_match_for_slot(send_idx);
+    msg.target_robot_id = get_robot_id(team_idx, target_is_blue);
 
     if (last_match.id != -1) {
         // 如果存在已匹配目标
@@ -91,14 +92,14 @@ redo:
         held_map_targets[send_idx].stamp = now;
         held_map_targets[send_idx].valid = true;
 
-        if (full_high_light[send_idx] == FULL_HIGHLIGHT_STATUS::SKIPPED) {// 对于满高亮的不继续发送，留出带宽
+        if (enemy_slot && full_high_light[team_idx] == FULL_HIGHLIGHT_STATUS::SKIPPED) {// 对于满高亮的不继续发送，留出带宽
             NEXT
         }
 
         if (double_send_sign)           // 已经两次发送，不再发送
             double_send_sign = false;
         // 判断如果进度很小就发两次
-        else if (last_mark.mark_progress[send_idx] < get_parameter("double_send_thres").as_int())
+        else if (enemy_slot && last_mark.mark_progress[team_idx] < get_parameter("double_send_thres").as_int())
             double_send_sign = true, stop_iter = true;
     // } else {
     //     if (blind_guess[send_idx].size() == 0){
@@ -124,7 +125,7 @@ redo:
         && (now - held_map_targets[send_idx].stamp).nanoseconds() <= detected_hold_ns
         && has_nearby_detection(held_map_targets[send_idx].msg, hold_guard_dist_sqr)) {
         msg = held_map_targets[send_idx].msg;
-        msg.target_robot_id = get_map_id(send_idx, color);
+        msg.target_robot_id = get_robot_id(team_idx, target_is_blue);
         stop_iter = true;
     } else {
         held_map_targets[send_idx].valid = false;
@@ -142,6 +143,7 @@ void MultiplexerNode::radar_mark_callback(const radar_interface::msg::RadarMarkD
     radar_interface::msg::FeedbackTargetArray fb_array;
 
     team_color enemy_color;
+    const int enemy_slot_offset = color == radar_interface::team_color::C_BLUE ? 0 : robot_num_per_team;
     switch (color) {
     case radar_interface::team_color::C_BLUE:
         enemy_color = team_color::C_RED;
@@ -154,11 +156,12 @@ void MultiplexerNode::radar_mark_callback(const radar_interface::msg::RadarMarkD
         return;
     }
 
-    for (unsigned i = 0; i < 6; ++i) {
+    for (int i = 0; i < robot_num_per_team; ++i) {
         int64_t diff = msg.mark_progress[i] - last_mark.mark_progress[i];
+        const int enemy_slot = enemy_slot_offset + i;
 
         radar_interface::msg::FeedbackTarget fb;
-        fb.id = last_pub_id[i];
+        fb.id = last_pub_id[enemy_slot];
         fb.type = i;
         fb.color = enemy_color;
 
@@ -178,10 +181,10 @@ void MultiplexerNode::radar_mark_callback(const radar_interface::msg::RadarMarkD
         // }
         if (diff > 0) {
             fb.is_right = true;
-            RCLCPP_INFO(get_logger(), "Right map: type: %d, id: %ld, progress: %d", i, last_pub_id[i], msg.mark_progress[i]);
+            RCLCPP_INFO(get_logger(), "Right map: type: %d, id: %ld, progress: %d", i, last_pub_id[enemy_slot], msg.mark_progress[i]);
             // else if (last_pub_id[i] < -1) // for blind guess
             //     keep_guess[i] = true;
-            if (last_pub_id[i] > -1)
+            if (last_pub_id[enemy_slot] > -1)
                 fb_array.targets.push_back(fb);
         }
 

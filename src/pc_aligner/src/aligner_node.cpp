@@ -8,6 +8,8 @@
 #include <radar_interface/livox_struct.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <vector>
+#include <opencv2/core/persistence.hpp>
+#include <Eigen/Core>
 
 // 构造函数：初始化节点并声明参数
 AlignerNode::AlignerNode() : Node("pc_aligner")
@@ -25,7 +27,7 @@ AlignerNode::AlignerNode() : Node("pc_aligner")
     declare_parameter("max_iteration", 30);
     declare_parameter("quality_gate.enable", true);
     declare_parameter("quality_gate.max_rmse", 0.24);
-    declare_parameter("quality_gate.min_fitness", 0.80);
+    declare_parameter("quality_gate.min_fitness", 0.60);
 
     declare_parameter("use_preselect", false); // 根据预选点进行对齐
     declare_parameter("preselect_pcd", "preselect.pcd");
@@ -44,6 +46,10 @@ AlignerNode::AlignerNode() : Node("pc_aligner")
     declare_parameter("tf_pub_interval_ms", 1000);
     // x, y, z, qw, qx, qy, qz
     auto init_trans = declare_parameter("init_trans", std::vector<double> { 0., 0., 0., 1., 0., 0., 0. });
+
+    // 加载LiDAR-Camera标定参数
+    declare_parameter("calibration_file", "calibration.yaml");
+    load_calibration_parameters();
 
     middle_tf = std::make_shared<geometry_msgs::msg::TransformStamped>();
     middle_tf->header.frame_id = get_parameter("sample_lidar").as_string() + "_frame";
@@ -230,5 +236,111 @@ void AlignerNode::sample_sub_callback(const sensor_msgs::msg::PointCloud2 &msg)
         pc_sample_context->next_step(pc_sample_context->recv_pc);
         pc_sample_context.reset();
         RCLCPP_INFO(get_logger(), "point sample complete");
+    }
+}
+
+// 加载标定参数
+bool AlignerNode::load_calibration_parameters()
+{
+    try {
+        std::string calibration_file = get_parameter("calibration_file").as_string();
+        std::filesystem::path calib_path;
+
+        // 首先尝试作为绝对路径
+        if (std::filesystem::is_regular_file(calibration_file)) {
+            calib_path = calibration_file;
+        } else {
+            // 尝试从 radar_bringup 包中查找
+            try {
+                std::filesystem::path radar_bringup_path = 
+                    ament_index_cpp::get_package_share_directory("radar_bringup");
+                calib_path = radar_bringup_path / "config" / calibration_file;
+                
+                if (!std::filesystem::is_regular_file(calib_path)) {
+                    RCLCPP_WARN(get_logger(), 
+                        "Calibration file not found at: %s", calib_path.c_str());
+                    return false;
+                }
+            } catch (const std::exception& e) {
+                RCLCPP_WARN(get_logger(), 
+                    "Failed to get radar_bringup package path: %s", e.what());
+                return false;
+            }
+        }
+
+        load_calibration_file(calib_path.string());
+        return calibration_loaded;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(get_logger(), 
+            "Exception in load_calibration_parameters: %s", e.what());
+        return false;
+    }
+}
+
+// 从YAML文件加载标定参数
+void AlignerNode::load_calibration_file(const std::string& calibration_file_path)
+{
+    try {
+        cv::FileStorage fs(calibration_file_path, cv::FileStorage::READ);
+        if (!fs.isOpened()) {
+            RCLCPP_ERROR(get_logger(), 
+                "Failed to open calibration file: %s", calibration_file_path.c_str());
+            return;
+        }
+
+        // 读取相机内参矩阵
+        cv::FileNode camera_intrinsic_node = fs["camera_intrinsic"];
+        if (!camera_intrinsic_node.empty()) {
+            camera_intrinsic_node >> camera_intrinsic;
+            RCLCPP_INFO(get_logger(), "Camera intrinsic matrix loaded (3x3)");
+        }
+
+        // 读取相机畸变系数
+        cv::FileNode camera_distortion_node = fs["camera_distortion"];
+        if (!camera_distortion_node.empty()) {
+            camera_distortion_node >> camera_distortion;
+            RCLCPP_INFO(get_logger(), "Camera distortion coefficients loaded (1x5)");
+        }
+
+        // 读取外参变换矩阵 (LiDAR -> Camera)
+        cv::FileNode lidar_to_camera_node = fs["lidar_to_camera"];
+        if (!lidar_to_camera_node.empty()) {
+            cv::Mat lidar_to_camera_cv;
+            lidar_to_camera_node >> lidar_to_camera_cv;
+            
+            // 转换为 Eigen::Matrix4d
+            lidar_to_camera = Eigen::Matrix4d::Identity();
+            for (int i = 0; i < 4; ++i) {
+                for (int j = 0; j < 4; ++j) {
+                    lidar_to_camera(i, j) = lidar_to_camera_cv.at<double>(i, j);
+                }
+            }
+            RCLCPP_INFO(get_logger(), "LiDAR to Camera transformation matrix loaded (4x4)");
+            
+            // 打印外参矩阵信息
+            RCLCPP_INFO(get_logger(), "LiDAR to Camera extrinsic matrix:");
+            RCLCPP_INFO(get_logger(), "[%.6f, %.6f, %.6f | %.6f]", 
+                lidar_to_camera(0,0), lidar_to_camera(0,1), lidar_to_camera(0,2), lidar_to_camera(0,3));
+            RCLCPP_INFO(get_logger(), "[%.6f, %.6f, %.6f | %.6f]", 
+                lidar_to_camera(1,0), lidar_to_camera(1,1), lidar_to_camera(1,2), lidar_to_camera(1,3));
+            RCLCPP_INFO(get_logger(), "[%.6f, %.6f, %.6f | %.6f]", 
+                lidar_to_camera(2,0), lidar_to_camera(2,1), lidar_to_camera(2,2), lidar_to_camera(2,3));
+            RCLCPP_INFO(get_logger(), "[%.6f, %.6f, %.6f | %.6f]", 
+                lidar_to_camera(3,0), lidar_to_camera(3,1), lidar_to_camera(3,2), lidar_to_camera(3,3));
+        }
+
+        calibration_loaded = true;
+        RCLCPP_INFO(get_logger(), "Calibration file loaded successfully: %s", 
+            calibration_file_path.c_str());
+
+        fs.release();
+    } catch (const cv::Exception& e) {
+        RCLCPP_ERROR(get_logger(), 
+            "OpenCV exception while loading calibration file: %s", e.what());
+        calibration_loaded = false;
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(get_logger(), 
+            "Exception while loading calibration file: %s", e.what());
+        calibration_loaded = false;
     }
 }

@@ -14,15 +14,12 @@ DetectorNode::DetectorNode(const rclcpp::NodeOptions& options) : Node("nn_detect
         RCLCPP_WARN(get_logger(), "Not In Intra Process Mode");
     }
 
-    DetectorParams params;
-    params.armor_config = declare_parameter("armor_detector_config", "");
-    params.enable_imshow = declare_parameter("enable_imshow", false);
-    params.debug = declare_parameter("debug", false);
+    detector_params_.armor_config = declare_parameter("armor_detector_config", "");
+    detector_params_.enable_imshow = declare_parameter("enable_imshow", false);
+    detector_params_.debug = declare_parameter("debug", false);
 
-    params.node_dir = ament_index_cpp::get_package_share_directory("nn_detector");
-    params.logger = get_logger();
-
-    core = std::make_shared<DetectorLib>(params);
+    detector_params_.node_dir = ament_index_cpp::get_package_share_directory("nn_detector");
+    detector_params_.logger = get_logger();
 
     // 注册装甲板检测服务
     detect_service = this->create_service<radar_interface::srv::Detect>(
@@ -42,6 +39,13 @@ DetectorNode::DetectorNode(const rclcpp::NodeOptions& options) : Node("nn_detect
     radar_warn_pub_ = this->create_publisher<radar_interface::msg::RadarWarn>("/lidar_detect", 10);
     uav_pos_pub_    = this->create_publisher<geometry_msgs::msg::PointStamped>("/radar/uav_target", 10);
     debug_other_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/livox/lidar_other", 10);
+}
+
+void DetectorNode::ensure_detector_ready()
+{
+    if (!core) {
+        core = std::make_shared<DetectorLib>(detector_params_);
+    }
 }
 
 void DetectorNode::point_cloud_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
@@ -75,6 +79,13 @@ void DetectorNode::point_cloud_callback(const sensor_msgs::msg::PointCloud2::Sha
 void DetectorNode::detect_service_callback(const radar_interface::srv::Detect::Request::SharedPtr req,
                                            radar_interface::srv::Detect::Response::SharedPtr rep)
 {
+    if (req->image.height == 0 || req->image.width == 0 || req->image.data.empty()) {
+        RCLCPP_WARN(this->get_logger(), "detect_armor request has empty image, skip inference.");
+        return;
+    }
+
+    ensure_detector_ready();
+
     cv::Mat img(req->image.height, req->image.width, encoding2mat_type(req->image.encoding),
                 req->image.data.data());
     *rep = *core->detect(img);

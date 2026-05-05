@@ -1,6 +1,29 @@
 #include <detector/net_decoder.h>
 #include <utils/common.h>
 
+#include <cmath>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+
+namespace {
+
+std::string dims_to_string(const std::vector<size_t> &dims) {
+    std::ostringstream oss;
+    oss << "[";
+    for (size_t i = 0; i < dims.size(); ++i) {
+        if (i > 0) {
+            oss << ", ";
+        }
+        oss << dims[i];
+    }
+    oss << "]";
+    return oss.str();
+}
+
+}  // namespace
+
 NetDecoderBase::NetDecoderBase(toml::value &config,const rclcpp::Logger& _logger): logger(_logger) {
     INPUT_W = config.at("INPUT_W").as_integer();
     INPUT_H = config.at("INPUT_H").as_integer();
@@ -205,6 +228,203 @@ void YOLOv5_1_Decoder::decode(int layer_index, const float *prob, std::vector<Ar
         }
     }
     return;
+}
+
+YOLOv5FlatDecoder::YOLOv5FlatDecoder(toml::value &config, const rclcpp::Logger &_logger)
+    : NetDecoderBase(config, _logger) {
+    class_color_map = toml::get<std::vector<int>>(config.at("class_color_map"));
+    class_type_map = toml::get<std::vector<int>>(config.at("class_type_map"));
+    assert((int)class_color_map.size() == NUM_CLASSES && "class_color_map size mismatch");
+    assert((int)class_type_map.size() == NUM_CLASSES && "class_type_map size mismatch");
+}
+
+void YOLOv5FlatDecoder::set_layer_info(int layer_index, const std::vector<size_t> &dims) {
+    if ((int)layers.size() != layer_index) {
+        throw std::runtime_error("YOLOv5FlatDecoder layer info must be set in order");
+    }
+    if (dims.size() != 3) {
+        throw std::runtime_error("YOLOv5FlatDecoder expected 3-dim output [batch, num_preds, "
+                                 "num_outputs], got " + dims_to_string(dims));
+    }
+    YOLOv5FlatLayerInfo layer = {
+        layer_index,
+        static_cast<int>(dims[1]),
+        static_cast<int>(dims[2]),
+    };
+    RCLCPP_INFO(logger, "flat layer %d: num_preds=%d, num_outputs=%d", layer_index, layer.num_preds,
+                layer.num_outputs);
+    if (!this->check_num_outputs(layer.num_outputs)) {
+        throw std::runtime_error("YOLOv5FlatDecoder expected num_outputs=" +
+                                 std::to_string(5 + NUM_CLASSES) + ", got " +
+                                 std::to_string(layer.num_outputs));
+    }
+    layers.push_back(layer);
+}
+
+bool YOLOv5FlatDecoder::check_num_outputs(int num_outputs) { return num_outputs == 5 + NUM_CLASSES; }
+
+void YOLOv5FlatDecoder::decode(int layer_index, const float *prob, std::vector<Armor> &objects) {
+    assert((int)layers.size() > layer_index && "layer_index out of range");
+    auto [_, num_preds, no] = layers[layer_index];
+    ++decode_calls;
+
+    float max_raw_obj_conf = -std::numeric_limits<float>::infinity();
+    float max_sigmoid_obj_conf = -std::numeric_limits<float>::infinity();
+    float max_raw_cls_conf = -std::numeric_limits<float>::infinity();
+    float max_sigmoid_cls_conf = -std::numeric_limits<float>::infinity();
+    int best_pred_idx = -1;
+    int best_cls_id = -1;
+    int invalid_candidate_count = 0;
+    int low_conf_candidate_count = 0;
+    int nonfinite_pred_count = 0;
+    float best_raw_vals[5] = {0.f, 0.f, 0.f, 0.f, 0.f};
+    float best_sigmoid_vals[2] = {0.f, 0.f};
+    bool captured_invalid_candidate = false;
+    float invalid_vals[5] = {0.f, 0.f, 0.f, 0.f, 0.f};
+
+    for (int pred_idx = 0; pred_idx < num_preds; ++pred_idx) {
+        const float *pred = prob + pred_idx * no;
+        bool pred_finite = true;
+        for (int idx = 0; idx < no; ++idx) {
+            if (!std::isfinite(pred[idx])) {
+                pred_finite = false;
+                break;
+            }
+        }
+        if (!pred_finite) {
+            ++nonfinite_pred_count;
+            continue;
+        }
+
+        const float raw_obj_conf = pred[4];
+        const float sigmoid_obj_conf = sigmoid(raw_obj_conf);
+        if (std::isfinite(raw_obj_conf)) {
+            max_raw_obj_conf = std::max(max_raw_obj_conf, raw_obj_conf);
+        }
+        if (std::isfinite(sigmoid_obj_conf)) {
+            max_sigmoid_obj_conf = std::max(max_sigmoid_obj_conf, sigmoid_obj_conf);
+        }
+
+        int cls_id = 0;
+        float raw_cls_conf = pred[5];
+        float sigmoid_cls_conf = sigmoid(raw_cls_conf);
+        for (int idx = 1; idx < NUM_CLASSES; ++idx) {
+            if (pred[5 + idx] > raw_cls_conf) {
+                raw_cls_conf = pred[5 + idx];
+                sigmoid_cls_conf = sigmoid(raw_cls_conf);
+                cls_id = idx;
+            }
+        }
+        if (std::isfinite(raw_cls_conf)) {
+            max_raw_cls_conf = std::max(max_raw_cls_conf, raw_cls_conf);
+        }
+        if (std::isfinite(sigmoid_cls_conf)) {
+            max_sigmoid_cls_conf = std::max(max_sigmoid_cls_conf, sigmoid_cls_conf);
+        }
+
+        if (raw_obj_conf > max_raw_obj_conf - 1e-6f) {
+            best_pred_idx = pred_idx;
+            best_cls_id = cls_id;
+            best_raw_vals[0] = pred[0];
+            best_raw_vals[1] = pred[1];
+            best_raw_vals[2] = pred[2];
+            best_raw_vals[3] = pred[3];
+            best_raw_vals[4] = raw_obj_conf;
+            best_sigmoid_vals[0] = sigmoid_obj_conf;
+            best_sigmoid_vals[1] = sigmoid_cls_conf;
+        }
+
+        const float obj_conf = raw_obj_conf;
+        if (obj_conf <= BBOX_CONF_THRESH)
+        {
+            ++low_conf_candidate_count;
+            continue;
+        }
+        const float cls_conf = raw_cls_conf;
+
+        const double final_conf = obj_conf * cls_conf;
+        if (final_conf <= BBOX_CONF_THRESH)
+            continue;
+        if (cls_id < 0 || cls_id >= NUM_CLASSES)
+            continue;
+
+        const int color = class_color_map[cls_id];
+        const int type = class_type_map[cls_id];
+        if (color < 0 || type < 0)
+            continue;
+
+        const float cx = pred[0];
+        const float cy = pred[1];
+        const float w = pred[2];
+        const float h = pred[3];
+        if (!std::isfinite(cx) || !std::isfinite(cy) || !std::isfinite(w) || !std::isfinite(h) ||
+            !std::isfinite(final_conf) || w <= 0.f || h <= 0.f) {
+            ++invalid_candidate_count;
+            if (!captured_invalid_candidate) {
+                invalid_vals[0] = cx;
+                invalid_vals[1] = cy;
+                invalid_vals[2] = w;
+                invalid_vals[3] = h;
+                invalid_vals[4] = static_cast<float>(final_conf);
+                captured_invalid_candidate = true;
+            }
+            continue;
+        }
+        const float x0 = cx - w * 0.5f;
+        const float y0 = cy - h * 0.5f;
+        const float x1 = cx + w * 0.5f;
+        const float y1 = cy + h * 0.5f;
+        if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) || !std::isfinite(y1) ||
+            x1 <= x0 || y1 <= y0) {
+            ++invalid_candidate_count;
+            if (!captured_invalid_candidate) {
+                invalid_vals[0] = cx;
+                invalid_vals[1] = cy;
+                invalid_vals[2] = w;
+                invalid_vals[3] = h;
+                invalid_vals[4] = static_cast<float>(final_conf);
+                captured_invalid_candidate = true;
+            }
+            continue;
+        }
+
+        Armor now;
+        now.rect = cv::Rect(x0, y0, x1 - x0, y1 - y0);
+        now.conf = final_conf;
+        now.color = color;
+        now.type = type;
+        now.size = 0;
+        now.pts[0] = cv::Point2f(x0, y0);
+        now.pts[1] = cv::Point2f(x1, y0);
+        now.pts[2] = cv::Point2f(x1, y1);
+        now.pts[3] = cv::Point2f(x0, y1);
+        now.pts[4] = cv::Point2f(cx, cy);
+        objects.push_back(now);
+    }
+
+    if (decode_calls % debug_log_period == 0 &&
+        (invalid_candidate_count > 0 || nonfinite_pred_count > 0 ||
+         (objects.empty() && max_raw_obj_conf > BBOX_CONF_THRESH))) {
+        std::string invalid_sample_suffix;
+        if (captured_invalid_candidate) {
+            invalid_sample_suffix = " invalid_sample=[" + std::to_string(invalid_vals[0]) + " " +
+                                    std::to_string(invalid_vals[1]) + " " +
+                                    std::to_string(invalid_vals[2]) + " " +
+                                    std::to_string(invalid_vals[3]) + " " +
+                                    std::to_string(invalid_vals[4]) + "]";
+        }
+        RCLCPP_WARN(
+            logger,
+            "V5_FLAT decode diag: layer=%d preds=%d kept=%zu nonfinite=%d invalid=%d low_conf=%d max_raw_obj=%.4f "
+            "max_sigmoid_obj=%.4f max_raw_cls=%.4f max_sigmoid_cls=%.4f best_pred=%d best_cls=%d "
+            "best_raw=[%.4f %.4f %.4f %.4f %.4f] best_sigmoid=[%.4f %.4f]%s",
+            layer_index, num_preds, objects.size(), nonfinite_pred_count, invalid_candidate_count,
+            low_conf_candidate_count,
+            max_raw_obj_conf, max_sigmoid_obj_conf, max_raw_cls_conf, max_sigmoid_cls_conf,
+            best_pred_idx, best_cls_id, best_raw_vals[0], best_raw_vals[1], best_raw_vals[2],
+            best_raw_vals[3], best_raw_vals[4], best_sigmoid_vals[0], best_sigmoid_vals[1],
+            invalid_sample_suffix.c_str());
+    }
 }
 
 DETRDecoder::DETRDecoder(toml::value &config, const rclcpp::Logger &_logger)

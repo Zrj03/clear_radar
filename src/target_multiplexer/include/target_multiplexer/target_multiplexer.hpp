@@ -44,15 +44,16 @@ private:
     radar_interface::msg::TargetArray last_detected;
     radar_interface::msg::RadarMarkData last_mark;
 
-    std::array<int64_t, 6> last_pub_id;
-    std::array<HeldMapTarget, 6> held_map_targets;
+    std::array<int64_t, 12> last_pub_id;
+    std::array<HeldMapTarget, 12> held_map_targets;
     // std::array<std::vector<std::pair<float, f-loat>>, 6> blind_guess;
     // std::array<bool, 6> keep_guess;
     std::array<FULL_HIGHLIGHT_STATUS, 6> full_high_light;
 
     // Default to C_RED to allow local testing without referee system connected
     team_color color = team_color::C_RED;
-    int robot_num = 6;
+    int robot_num = 12;
+    int robot_num_per_team = 6;
 
     void radar_mark_callback(const radar_interface::msg::RadarMarkData& msg);
     void team_color_callback(const radar_interface::team_color::msg& msg);
@@ -63,7 +64,9 @@ private:
     // void load_blind_guess();
 
     // 用于 MapRobotData 的 ID
-    static uint16_t get_map_id(unsigned ori_id, team_color color_);
+    static uint16_t get_robot_id(unsigned ori_id, bool target_is_blue);
+    bool is_enemy_slot(int slot_idx) const;
+    radar_interface::msg::MatchedTarget get_match_for_slot(int slot_idx) const;
 
 public:
     MultiplexerNode();
