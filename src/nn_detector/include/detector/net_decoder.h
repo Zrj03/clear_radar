@@ -67,8 +67,12 @@ class YOLOv5FlatDecoder : public NetDecoderBase {
 class YOLOv8Decoder : public NetDecoderBase {
    protected:
     int NUM_KPTS, NUM_TSIZES;
+    bool standard_detect = false;
+    std::vector<int> class_color_map;
+    std::vector<int> class_type_map;
     struct YOLOv8LayerInfo {
-        int index, num_outputs, stride;
+        int index, num_outputs, num_preds, stride;
+        bool channels_first;
     };
     std::vector<YOLOv8LayerInfo> layers;
 

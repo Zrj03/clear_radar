@@ -17,11 +17,11 @@ MultiplexerNode::MultiplexerNode()
     for (int i = 0; i < 6; ++i) {
         last_match_result.red[i].id = -1;
         last_match_result.blue[i].id = -1;
-        last_mark.mark_progress[i] = 0;
         // keep_guess[i] = false;
         // Without judge feedback, default to NONE to avoid skipping all slots.
         full_high_light[i] = FULL_HIGHLIGHT_STATUS::NONE;
     }
+    last_mark.mark_progress = 0;
     last_pub_id.fill(-1);
     // load_blind_guess();
 
@@ -36,10 +36,7 @@ MultiplexerNode::MultiplexerNode()
     else
         color = team_color::C_RED;
     RCLCPP_INFO(get_logger(), "Default team color: %s", color == team_color::C_BLUE ? "BLUE" : "RED");
-    if (declare_parameter("no_bot_5", false))
-        robot_num_per_team = 5;
-    else
-        robot_num_per_team = 6;
+    robot_num_per_team = 6;
     robot_num = robot_num_per_team * 2;
 
     match_result_sub = create_subscription<radar_interface::msg::MatchResult>("matcher/match_result",

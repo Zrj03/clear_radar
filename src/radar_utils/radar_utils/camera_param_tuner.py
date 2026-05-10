@@ -22,13 +22,14 @@ class ParamSpec:
     maximum: float
     step: float
     decimals: int
+    default: float
 
 
 class CameraParamTunerUI:
     PARAMS = (
-        ParamSpec("exposure_time", "曝光时间", 1000.0, 40000.0, 100.0, 1),
-        ParamSpec("gain", "增益", 0.0, 64.0, 0.5, 2),
-        ParamSpec("digital_shift", "数字增益", 0.0, 16.0, 0.1, 2),
+        ParamSpec("exposure_time", "曝光时间", 1000.0, 40000.0, 100.0, 1, 12000.0),
+        ParamSpec("gain", "增益", 0.0, 64.0, 0.5, 2, 23.0),
+        ParamSpec("digital_shift", "数字增益", 0.0, 16.0, 0.1, 2, 1.0),
     )
 
     def __init__(self, node: Node):
@@ -73,7 +74,7 @@ class CameraParamTunerUI:
         for row_idx, spec in enumerate(self.PARAMS):
             ttk.Label(body, text=spec.label, width=16).grid(row=row_idx, column=0, sticky=tk.W, padx=(0, 8), pady=8)
 
-            value_var = tk.DoubleVar(value=spec.minimum)
+            value_var = tk.DoubleVar(value=spec.default)
             scale = tk.Scale(
                 body,
                 from_=spec.minimum,
@@ -90,7 +91,7 @@ class CameraParamTunerUI:
 
             entry = ttk.Entry(body, width=12)
             entry.grid(row=row_idx, column=2, sticky=tk.W, padx=(0, 6), pady=4)
-            entry.insert(0, self._fmt(spec, spec.minimum))
+            entry.insert(0, self._fmt(spec, spec.default))
             entry.bind("<Return>", lambda _e, k=spec.key: self._on_entry_commit(k))
             entry.bind("<FocusOut>", lambda _e, k=spec.key: self._on_entry_commit(k))
 

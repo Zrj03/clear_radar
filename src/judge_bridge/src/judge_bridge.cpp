@@ -7,14 +7,17 @@
  * 功能说明: 
  *   - 与RoboMaster裁判系统通过串口进行通信(115200波特率)
  *   - 作为雷达和哨兵之间的通信网桥
- *   - 处理来自裁判系统的消息(机器人状态、游戏状态、交互数据等)
+ *   - 处理来自裁判系统的消息
  *   - 向哨兵发送雷达检测的目标信息和入侵警报
  * ============================================================================ */
 #include <boost/locale.hpp>
 #include <boost/locale/encoding.hpp>
 #include <boost/locale/encoding_errors.hpp>
 #include <boost/locale/encoding_utf.hpp>
+#include <boost/filesystem.hpp>
+#include <algorithm>
 #include <codecvt>
+#include <cmath>
 #include <locale>
 #include <cstdint>
 #include <functional>
@@ -22,6 +25,34 @@
 #include <rclcpp/qos.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <string>
+#include <vector>
+
+namespace {
+std::vector<std::string> get_serial_port_candidates(const std::string& configured_port)
+{
+    std::vector<std::string> ports;
+    std::string port = configured_port;
+    std::transform(port.begin(), port.end(), port.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (!configured_port.empty() && port != "auto") {
+        ports.push_back(configured_port);
+        return ports;
+    }
+
+    const boost::filesystem::path dev_path("/dev");
+    if (!boost::filesystem::exists(dev_path))
+        return ports;
+
+    for (const auto& entry : boost::filesystem::directory_iterator(dev_path)) {
+        const std::string name = entry.path().filename().string();
+        if (name.rfind("ttyACM", 0) == 0 || name.rfind("ttyUSB", 0) == 0)
+            ports.push_back(entry.path().string());
+    }
+    std::sort(ports.begin(), ports.end());
+    return ports;
+}
+}
 
 
 void JudgeBridgeNode::filter_handler(JudgeSerial::JudgePair message)
@@ -37,6 +68,36 @@ void JudgeBridgeNode::filter_handler(JudgeSerial::JudgePair message)
         auto radar_info = reinterpret_cast<radar_info_t*>(message.second.data());
         auto radar_info_msg = decode_radar_info(*radar_info);
         pub_radar_info->publish(radar_info_msg);
+        }
+        break;
+    case CMD_ID::RADAR_LINK_POSITION: {
+        auto data = reinterpret_cast<radar_link_position_t*>(message.second.data());
+        pub_radar_link_position->publish(decode_radar_link_position(*data));
+        }
+        break;
+    case CMD_ID::RADAR_LINK_HP: {
+        auto data = reinterpret_cast<radar_link_hp_t*>(message.second.data());
+        pub_radar_link_hp->publish(decode_radar_link_hp(*data));
+        }
+        break;
+    case CMD_ID::RADAR_LINK_BULLET: {
+        auto data = reinterpret_cast<radar_link_bullet_t*>(message.second.data());
+        pub_radar_link_bullet->publish(decode_radar_link_bullet(*data));
+        }
+        break;
+    case CMD_ID::RADAR_LINK_COIN_AND_OCCUPY: {
+        auto data = reinterpret_cast<radar_link_coin_and_occupy_t*>(message.second.data());
+        pub_radar_link_coin_and_occupy->publish(decode_radar_link_coin_and_occupy(*data));
+        }
+        break;
+    case CMD_ID::RADAR_LINK_BUFF: {
+        auto data = reinterpret_cast<radar_link_buff_t*>(message.second.data());
+        pub_radar_link_buff->publish(decode_radar_link_buff(*data));
+        }
+        break;
+    case CMD_ID::RADAR_LINK_PASSWORD: {
+        auto data = reinterpret_cast<radar_link_password_t*>(message.second.data());
+        pub_radar_link_password->publish(decode_radar_link_password(*data));
         }
         break;
     case CMD_ID::ROBOT_STATUS:
@@ -62,13 +123,29 @@ void JudgeBridgeNode::filter_handler(JudgeSerial::JudgePair message)
 
 void JudgeBridgeNode::send_radar_cmd(const std_msgs::msg::UInt8 &radar_cmd)
 {
+    if (color == team_color::UNKNOWN)
+    {
+        RCLCPP_WARN(get_logger(), "Unkown Color!");
+        return;
+    }
     // 将雷达命令转发给DV设备
-    // 数据结构: header(cmd_id+sender_id+receiver_id) + radar_cmd
-    robot_interaction_dv_data_t dv_data;
+    // 2026 protocol: header(cmd_id+sender_id+receiver_id) + 8-byte radar_cmd_t.
+    robot_interaction_dv_data_t dv_data {};
     dv_data.header.data_cmd_id = RADAR_CMD;
     dv_data.header.sender_id = RADAR_ID[color];
     dv_data.header.receiver_id = 0x8080;
-    dv_data.radar_cmd = radar_cmd.data;
+    dv_data.cmd.radar_cmd = radar_cmd.data;
+    dv_data.cmd.password_cmd = static_cast<uint8_t>(
+        std::clamp<int64_t>(get_parameter("radar_password_cmd").as_int(), 0, 255));
+
+    auto password = get_parameter("radar_password").as_string();
+    password.resize(6, '0');
+    dv_data.cmd.password_1 = static_cast<uint8_t>(password[0]);
+    dv_data.cmd.password_2 = static_cast<uint8_t>(password[1]);
+    dv_data.cmd.password_3 = static_cast<uint8_t>(password[2]);
+    dv_data.cmd.password_4 = static_cast<uint8_t>(password[3]);
+    dv_data.cmd.password_5 = static_cast<uint8_t>(password[4]);
+    dv_data.cmd.password_6 = static_cast<uint8_t>(password[5]);
     judge_serial->write(CMD_ID::INTERACTION_DATA, reinterpret_cast<uint8_t*>(&dv_data), sizeof(dv_data));
     RCLCPP_INFO(get_logger(), "DV: %d", radar_cmd.data);
 }
@@ -155,8 +232,8 @@ void JudgeBridgeNode::game_status_callback(const game_status_t& status)
  * 功能: 处理机器人血量消息，转换并发布为标准ROS消息格式
  * 参数: hp - 包含红蓝队所有机器人和防御阵地的血量数据
  * 说明: 将裁判系统格式转换为GameRobotHP消息，包含:
- *       - 红队: 哨兵、英雄、工程、3/4/5步兵各部队血量
- *       - 蓝队: 哨兵、英雄、工程、3/4/5步兵各部队血量
+ *       - 红队: 哨兵、英雄、工程、3号步兵、4号步兵、空中机器人
+ *       - 蓝队: 哨兵、英雄、工程、3号步兵、4号步兵、空中机器人
  *       - 双方基地和前哨站血量
  */
 void JudgeBridgeNode::game_robot_hp_callback(const game_robot_HP_t& hp)
@@ -439,40 +516,52 @@ void JudgeBridgeNode::send_map_robot_data(const radar_interface::msg::MatchResul
 {
     check_enemy_invasion(msg);
 
-    map_robot_data_t map_robot_data;
-    constexpr uint16_t default_red_x = 210, default_red_y = 110;
-    constexpr uint16_t default_blue_x = 2800 - 210, default_blue_y = 1500 - 110;
+    map_robot_data_t map_robot_data {};
+    auto to_cm = [](double meters) -> uint16_t {
+        const auto centimeters = std::lround(meters * 100.0);
+        return static_cast<uint16_t>(std::clamp<long>(centimeters, 0, 65535));
+    };
+    auto fill_target = [&](uint16_t& x, uint16_t& y, const auto& targets, size_t index) {
+        if (index >= targets.size() || targets[index].id == -1) {
+            x = 0;
+            y = 0;
+            return;
+        }
+        x = to_cm(targets[index].position[0]);
+        y = to_cm(targets[index].position[1]);
+    };
+
     switch (color) {
-    case team_color::C_RED:
-        // 我方为红队，应发送蓝队敌人位置；若敌人离线则使用默认位置
-        map_robot_data.sentry_position_x = msg.blue[0].id != -1 ? msg.blue[0].position[0] * 100 : default_blue_x;
-        map_robot_data.sentry_position_y = msg.blue[0].id != -1 ? msg.blue[0].position[1] * 100 : default_blue_y;
-        map_robot_data.hero_position_x = msg.blue[1].id != -1 ? msg.blue[1].position[0] * 100 : default_blue_x;
-        map_robot_data.hero_position_y = msg.blue[1].id != -1 ? msg.blue[1].position[1] * 100 : default_blue_y;
-        map_robot_data.engineer_position_x = msg.blue[2].id != -1 ? msg.blue[2].position[0] * 100 : default_blue_x;
-        map_robot_data.engineer_position_y = msg.blue[2].id != -1 ? msg.blue[2].position[1] * 100 : default_blue_y;
-        map_robot_data.infantry_3_position_x = msg.blue[3].id != -1 ? msg.blue[3].position[0] * 100 : default_blue_x;
-        map_robot_data.infantry_3_position_y = msg.blue[3].id != -1 ? msg.blue[3].position[1] * 100 : default_blue_y;
-        map_robot_data.infantry_4_position_x = msg.blue[4].id != -1 ? msg.blue[4].position[0] * 100 : default_blue_x;
-        map_robot_data.infantry_4_position_y = msg.blue[4].id != -1 ? msg.blue[4].position[1] * 100 : default_blue_y;
-        map_robot_data.infantry_5_position_x = msg.blue[5].id != -1 ? msg.blue[5].position[0] * 100 : default_blue_x;
-        map_robot_data.infantry_5_position_y = msg.blue[5].id != -1 ? msg.blue[5].position[1] * 100 : default_blue_y;
+    case team_color::C_RED: {
+        fill_target(map_robot_data.opponent_hero_position_x, map_robot_data.opponent_hero_position_y, msg.blue, 1);
+        fill_target(map_robot_data.opponent_engineer_position_x, map_robot_data.opponent_engineer_position_y, msg.blue, 2);
+        fill_target(map_robot_data.opponent_infantry_3_position_x, map_robot_data.opponent_infantry_3_position_y, msg.blue, 3);
+        fill_target(map_robot_data.opponent_infantry_4_position_x, map_robot_data.opponent_infantry_4_position_y, msg.blue, 4);
+        fill_target(map_robot_data.opponent_aerial_position_x, map_robot_data.opponent_aerial_position_y, msg.blue, 5);
+        fill_target(map_robot_data.opponent_sentry_position_x, map_robot_data.opponent_sentry_position_y, msg.blue, 0);
+        fill_target(map_robot_data.ally_hero_position_x, map_robot_data.ally_hero_position_y, msg.red, 1);
+        fill_target(map_robot_data.ally_engineer_position_x, map_robot_data.ally_engineer_position_y, msg.red, 2);
+        fill_target(map_robot_data.ally_infantry_3_position_x, map_robot_data.ally_infantry_3_position_y, msg.red, 3);
+        fill_target(map_robot_data.ally_infantry_4_position_x, map_robot_data.ally_infantry_4_position_y, msg.red, 4);
+        fill_target(map_robot_data.ally_aerial_position_x, map_robot_data.ally_aerial_position_y, msg.red, 5);
+        fill_target(map_robot_data.ally_sentry_position_x, map_robot_data.ally_sentry_position_y, msg.red, 0);
         break;
-    case team_color::C_BLUE:
-        // 我方为蓝队，应发送红队敌人位置；若敌人离线则使用默认位置
-        map_robot_data.sentry_position_x = msg.red[0].id != -1 ? msg.red[0].position[0] * 100 : default_red_x;
-        map_robot_data.sentry_position_y = msg.red[0].id != -1 ? msg.red[0].position[1] * 100 : default_red_y;
-        map_robot_data.hero_position_x = msg.red[1].id != -1 ? msg.red[1].position[0] * 100 : default_red_x;
-        map_robot_data.hero_position_y = msg.red[1].id != -1 ? msg.red[1].position[1] * 100 : default_red_y;
-        map_robot_data.engineer_position_x = msg.red[2].id != -1 ? msg.red[2].position[0] * 100 : default_red_x;
-        map_robot_data.engineer_position_y = msg.red[2].id != -1 ? msg.red[2].position[1] * 100 : default_red_y;
-        map_robot_data.infantry_3_position_x = msg.red[3].id != -1 ? msg.red[3].position[0] * 100 : default_red_x;
-        map_robot_data.infantry_3_position_y = msg.red[3].id != -1 ? msg.red[3].position[1] * 100 : default_red_y;
-        map_robot_data.infantry_4_position_x = msg.red[4].id != -1 ? msg.red[4].position[0] * 100 : default_red_x;
-        map_robot_data.infantry_4_position_y = msg.red[4].id != -1 ? msg.red[4].position[1] * 100 : default_red_y;
-        map_robot_data.infantry_5_position_x = msg.red[5].id != -1 ? msg.red[5].position[0] * 100 : default_red_x;
-        map_robot_data.infantry_5_position_y = msg.red[5].id != -1 ? msg.red[5].position[1] * 100 : default_red_y;
+    }
+    case team_color::C_BLUE: {
+        fill_target(map_robot_data.opponent_hero_position_x, map_robot_data.opponent_hero_position_y, msg.red, 1);
+        fill_target(map_robot_data.opponent_engineer_position_x, map_robot_data.opponent_engineer_position_y, msg.red, 2);
+        fill_target(map_robot_data.opponent_infantry_3_position_x, map_robot_data.opponent_infantry_3_position_y, msg.red, 3);
+        fill_target(map_robot_data.opponent_infantry_4_position_x, map_robot_data.opponent_infantry_4_position_y, msg.red, 4);
+        fill_target(map_robot_data.opponent_aerial_position_x, map_robot_data.opponent_aerial_position_y, msg.red, 5);
+        fill_target(map_robot_data.opponent_sentry_position_x, map_robot_data.opponent_sentry_position_y, msg.red, 0);
+        fill_target(map_robot_data.ally_hero_position_x, map_robot_data.ally_hero_position_y, msg.blue, 1);
+        fill_target(map_robot_data.ally_engineer_position_x, map_robot_data.ally_engineer_position_y, msg.blue, 2);
+        fill_target(map_robot_data.ally_infantry_3_position_x, map_robot_data.ally_infantry_3_position_y, msg.blue, 3);
+        fill_target(map_robot_data.ally_infantry_4_position_x, map_robot_data.ally_infantry_4_position_y, msg.blue, 4);
+        fill_target(map_robot_data.ally_aerial_position_x, map_robot_data.ally_aerial_position_y, msg.blue, 5);
+        fill_target(map_robot_data.ally_sentry_position_x, map_robot_data.ally_sentry_position_y, msg.blue, 0);
         break;
+    }
     default:
         return;
     }
@@ -483,7 +572,7 @@ void JudgeBridgeNode::send_map_robot_data(const radar_interface::msg::MatchResul
 /**
  * 功能: 初始化与RoboMaster裁判系统的串口连接
  * 说明:
- *   - 获取配置参数(端口号通常为/dev/ttyUSB0)
+ *   - 获取配置参数，默认自动扫描/dev/ttyACM*和/dev/ttyUSB*
  *   - 自动重连机制：若连接失败，每1秒自动重试一次
  *   - 若ROS2已关闭则抛出异常，停止重连
  *   - enable_recorder参数可用于记录/回放串口数据(用于调试)
@@ -496,14 +585,25 @@ void JudgeBridgeNode::init_serial()
         // 循环重试直到成功建立连接
         std::string serial_port = get_parameter("serial_port").as_string();
         bool enable_recorder = get_parameter("enable_recorder").as_bool();
-        try {
-            judge_serial = std::make_unique<JudgeSerial>(serial_port, enable_recorder);
-        } catch (boost::system::system_error& e) {
-            RCLCPP_WARN(get_logger(), "Connect to Serial %s failed, e.what(): %s", serial_port.c_str(), e.what());
+        const auto serial_ports = get_serial_port_candidates(serial_port);
+        if (serial_ports.empty()) {
+            RCLCPP_WARN(get_logger(), "No serial device found for judge_bridge, waiting...");
             if (!rclcpp::ok())
-                throw e;
+                throw std::runtime_error("No serial device found for judge_bridge");
             std::this_thread::sleep_for(std::chrono::seconds(1));
+            continue;
         }
+        for (const auto& port : serial_ports) {
+            try {
+                judge_serial = std::make_unique<JudgeSerial>(port, enable_recorder);
+                RCLCPP_INFO(get_logger(), "Connected to Serial %s", port.c_str());
+                break;
+            } catch (boost::system::system_error& e) {
+                RCLCPP_WARN(get_logger(), "Connect to Serial %s failed, e.what(): %s", port.c_str(), e.what());
+            }
+        }
+        if (!judge_serial)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 }
 
@@ -511,7 +611,7 @@ void JudgeBridgeNode::init_serial()
  * 构造函数与节点初始化流程
  * 功能说明：
  *   1. 声明ROS参数(串口号、是否记录通信):
- *      - serial_port: 串口设备文件路径(默认/dev/ttyUSB0)
+ *      - serial_port: 串口设备文件路径，默认auto自动扫描/dev/ttyACM*和/dev/ttyUSB*
  *      - enable_recorder: 是否将串口通信数据写入日志
  *   2. 初始化串口连接(调用init_serial)
  *
@@ -540,8 +640,10 @@ void JudgeBridgeNode::init_serial()
 JudgeBridgeNode::JudgeBridgeNode()
     : rclcpp::Node("judge_bridge")
 {
-    declare_parameter("serial_port", "/dev/ttyUSB0");
+    declare_parameter("serial_port", "auto");
     declare_parameter("enable_recorder", false);
+    declare_parameter("radar_password_cmd", 0);
+    declare_parameter("radar_password", "000000");
     
     // ============ 初始化串口 ============
     init_serial();
@@ -550,6 +652,12 @@ JudgeBridgeNode::JudgeBridgeNode()
     // 将裁判系统消息转换为ROS话题发送
     pub_radar_mark_data = create_publisher<radar_interface::msg::RadarMarkData>("judge/radar_mark_data", rclcpp::SystemDefaultsQoS());
     pub_radar_info = create_publisher<radar_interface::msg::RadarInfo>("judge/radar_info", rclcpp::SystemDefaultsQoS());
+    pub_radar_link_position = create_publisher<radar_interface::msg::RadarLinkPosition>("judge/radar_link_position", rclcpp::SystemDefaultsQoS());
+    pub_radar_link_hp = create_publisher<radar_interface::msg::RadarLinkHp>("judge/radar_link_hp", rclcpp::SystemDefaultsQoS());
+    pub_radar_link_bullet = create_publisher<radar_interface::msg::RadarLinkBullet>("judge/radar_link_bullet", rclcpp::SystemDefaultsQoS());
+    pub_radar_link_coin_and_occupy = create_publisher<radar_interface::msg::RadarLinkCoinAndOccupy>("judge/radar_link_coin_and_occupy", rclcpp::SystemDefaultsQoS());
+    pub_radar_link_buff = create_publisher<radar_interface::msg::RadarLinkBuff>("judge/radar_link_buff", rclcpp::SystemDefaultsQoS());
+    pub_radar_link_password = create_publisher<radar_interface::msg::RadarLinkPassword>("judge/radar_link_password", rclcpp::SystemDefaultsQoS());
     pub_color = create_publisher<radar_interface::team_color::msg>("judge/color", rclcpp::SystemDefaultsQoS());
     pub_remain_time = create_publisher<std_msgs::msg::UInt16>("judge/remain_time", rclcpp::SystemDefaultsQoS());
     pub_game_robot_hp = create_publisher<radar_interface::msg::GameRobotHP>("judge/game_robot_hp", rclcpp::SystemDefaultsQoS());

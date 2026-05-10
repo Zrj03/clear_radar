@@ -14,12 +14,7 @@ struct frame_header_t {
 
 // 定义于裁判系统手册
 struct radar_mark_data_t {
-    uint8_t mark_hero_progress;
-    uint8_t mark_engineer_progress;
-    uint8_t mark_standard_3_progress;
-    uint8_t mark_standard_4_progress;
-    uint8_t mark_standard_5_progress;
-    uint8_t mark_sentry_progress;
+    uint16_t mark_progress;
 };
 
 struct radar_info_t {
@@ -28,21 +23,111 @@ struct radar_info_t {
 
 struct radar_cmd_t {
     uint8_t radar_cmd;
+    uint8_t password_cmd;
+    uint8_t password_1;
+    uint8_t password_2;
+    uint8_t password_3;
+    uint8_t password_4;
+    uint8_t password_5;
+    uint8_t password_6;
 };
 
 struct map_robot_data_t {
-    uint16_t hero_position_x;
-    uint16_t hero_position_y;
-    uint16_t engineer_position_x;
-    uint16_t engineer_position_y;
-    uint16_t infantry_3_position_x;
-    uint16_t infantry_3_position_y;
-    uint16_t infantry_4_position_x;
-    uint16_t infantry_4_position_y;
-    uint16_t infantry_5_position_x;
-    uint16_t infantry_5_position_y;
-    uint16_t sentry_position_x;
-    uint16_t sentry_position_y;
+    uint16_t opponent_hero_position_x;
+    uint16_t opponent_hero_position_y;
+    uint16_t opponent_engineer_position_x;
+    uint16_t opponent_engineer_position_y;
+    uint16_t opponent_infantry_3_position_x;
+    uint16_t opponent_infantry_3_position_y;
+    uint16_t opponent_infantry_4_position_x;
+    uint16_t opponent_infantry_4_position_y;
+    uint16_t opponent_aerial_position_x;
+    uint16_t opponent_aerial_position_y;
+    uint16_t opponent_sentry_position_x;
+    uint16_t opponent_sentry_position_y;
+    uint16_t ally_hero_position_x;
+    uint16_t ally_hero_position_y;
+    uint16_t ally_engineer_position_x;
+    uint16_t ally_engineer_position_y;
+    uint16_t ally_infantry_3_position_x;
+    uint16_t ally_infantry_3_position_y;
+    uint16_t ally_infantry_4_position_x;
+    uint16_t ally_infantry_4_position_y;
+    uint16_t ally_aerial_position_x;
+    uint16_t ally_aerial_position_y;
+    uint16_t ally_sentry_position_x;
+    uint16_t ally_sentry_position_y;
+};
+
+struct radar_link_position_t {
+    uint16_t opponent_hero_position_x;
+    uint16_t opponent_hero_position_y;
+    uint16_t opponent_engineer_position_x;
+    uint16_t opponent_engineer_position_y;
+    uint16_t opponent_infantry_3_position_x;
+    uint16_t opponent_infantry_3_position_y;
+    uint16_t opponent_infantry_4_position_x;
+    uint16_t opponent_infantry_4_position_y;
+    uint16_t opponent_aerial_position_x;
+    uint16_t opponent_aerial_position_y;
+    uint16_t opponent_sentry_position_x;
+    uint16_t opponent_sentry_position_y;
+};
+
+struct radar_link_hp_t {
+    uint16_t opponent_hero_hp;
+    uint16_t opponent_engineer_hp;
+    uint16_t opponent_infantry_3_hp;
+    uint16_t opponent_infantry_4_hp;
+    uint16_t reserved;
+    uint16_t opponent_sentry_hp;
+};
+
+struct radar_link_bullet_t {
+    uint16_t opponent_hero_bullet;
+    uint16_t opponent_infantry_3_bullet;
+    uint16_t opponent_infantry_4_bullet;
+    uint16_t opponent_aerial_bullet;
+    uint16_t opponent_sentry_bullet;
+};
+
+struct radar_link_coin_and_occupy_t {
+    uint16_t opponent_remaining_coin;
+    uint16_t opponent_total_coin;
+    uint32_t occupy_status;
+};
+
+struct radar_link_buff_t {
+    uint8_t opponent_hero_hp_recover_buff;
+    uint16_t opponent_hero_shooter_cooling_buff;
+    uint8_t opponent_hero_defense_buff;
+    uint8_t opponent_hero_negative_defense_buff;
+    uint16_t opponent_hero_attack_buff;
+    uint8_t opponent_engineer_hp_recover_buff;
+    uint16_t opponent_engineer_shooter_cooling_buff;
+    uint8_t opponent_engineer_defense_buff;
+    uint8_t opponent_engineer_negative_defense_buff;
+    uint16_t opponent_engineer_attack_buff;
+    uint8_t opponent_infantry_3_hp_recover_buff;
+    uint16_t opponent_infantry_3_shooter_cooling_buff;
+    uint8_t opponent_infantry_3_defense_buff;
+    uint8_t opponent_infantry_3_negative_defense_buff;
+    uint16_t opponent_infantry_3_attack_buff;
+    uint8_t opponent_infantry_4_hp_recover_buff;
+    uint16_t opponent_infantry_4_shooter_cooling_buff;
+    uint8_t opponent_infantry_4_defense_buff;
+    uint8_t opponent_infantry_4_negative_defense_buff;
+    uint16_t opponent_infantry_4_attack_buff;
+    uint8_t opponent_sentry_hp_recover_buff;
+    uint16_t opponent_sentry_shooter_cooling_buff;
+    uint8_t opponent_sentry_defense_buff;
+    uint8_t opponent_sentry_negative_defense_buff;
+    uint16_t opponent_sentry_attack_buff;
+    uint8_t opponent_sentry_current_pose;
+};
+
+struct radar_link_password_t {
+    uint8_t password[6];
 };
 
 // 2023
@@ -103,7 +188,7 @@ struct robot_interaction_dv_data_t {
     // uint16_t sender_id;
     // uint16_t receiver_id = 0x8080;
     robot_interaction_header_t header;
-    uint8_t radar_cmd;
+    radar_cmd_t cmd;
 };
 
 struct robot_interaction_map_data_t {
@@ -134,6 +219,16 @@ struct robot_interaction_uwb_t {
     float standard_5_x;
     float standard_5_y;
 };
+
+static_assert(sizeof(radar_mark_data_t) == 2);
+static_assert(sizeof(radar_cmd_t) == 8);
+static_assert(sizeof(map_robot_data_t) == 48);
+static_assert(sizeof(radar_link_position_t) == 24);
+static_assert(sizeof(radar_link_hp_t) == 12);
+static_assert(sizeof(radar_link_bullet_t) == 10);
+static_assert(sizeof(radar_link_coin_and_occupy_t) == 8);
+static_assert(sizeof(radar_link_buff_t) == 36);
+static_assert(sizeof(radar_link_password_t) == 6);
 
 struct game_status_t
 { 
@@ -175,6 +270,12 @@ enum CMD_ID {
     MAP_COMMAND = 0x0303,
     INTERACTION_DATA = 0x0301,
     SEND_CUSTOM_INFO = 0x0308,
+    RADAR_LINK_POSITION = 0x0A01,
+    RADAR_LINK_HP = 0x0A02,
+    RADAR_LINK_BULLET = 0x0A03,
+    RADAR_LINK_COIN_AND_OCCUPY = 0x0A04,
+    RADAR_LINK_BUFF = 0x0A05,
+    RADAR_LINK_PASSWORD = 0x0A06,
 };
 
 enum RADAR_ID {
@@ -188,10 +289,10 @@ constexpr uint8_t HERO_ID[] = {101, 1};
 constexpr uint8_t ENGINEER_ID[] = {102, 2};
 constexpr uint8_t STANDARD_1_ID[] = {103, 3};
 constexpr uint8_t STANDARD_2_ID[] = {104, 4};
-constexpr uint8_t STANDARD_3_ID[] = {105, 5};
+constexpr uint8_t AERIAL_ID[] = {106, 6};
 
-constexpr uint8_t RED_ROBOT[] = {7, 1, 2, 3, 4, 5};
-constexpr uint8_t BLUE_ROBOT[] = {107, 101, 102, 103, 104, 105};
+constexpr uint8_t RED_ROBOT[] = {7, 1, 2, 3, 4, 6};
+constexpr uint8_t BLUE_ROBOT[] = {107, 101, 102, 103, 104, 106};
 
 
 // blue, red

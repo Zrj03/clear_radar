@@ -26,12 +26,10 @@ node_params = os.path.join(
 def get_xyzw_tf_broadcaster(cali: list, fr: str, child_fr: str):
     """
     根据给定的位姿四元数/平移（x,y,z,qx,qy,qz,qw）生成一个静态 TF 发布节点。
-
     参数:
     - cali: 包含 [x, y, z, qx, qy, qz, qw] 的列表
     - fr: 父坐标系名称（frame id）
     - child_fr: 子坐标系名称（child frame id）
-
     返回:
     - 一个启动 `static_transform_publisher` 的 `Node` 对象，用于将静态变换发布到 TF 树中。
     """
@@ -54,12 +52,10 @@ def get_xyzw_tf_broadcaster(cali: list, fr: str, child_fr: str):
 def get_matrix_tf_broadcaster(cali: np.array, fr: str, child_fr: str):
     """
     接受 4x4 仿射矩阵（numpy array），分解为平移和四元数后发布静态 TF。
-
     参数:
     - cali: 4x4 仿射变换矩阵，最后一行为 [0,0,0,1]
     - fr: 父坐标系名称
     - child_fr: 子坐标系名称
-
     用途:
     - 方便从外部计算好的仿射矩阵直接生成 TF 发布，而不必手动拆解为 xyzw/q。
     """
@@ -83,11 +79,9 @@ def get_matrix_tf_broadcaster(cali: np.array, fr: str, child_fr: str):
 def get_vision_container(cam_name: str, sn: str, camera_info_url: str):
         """
         构建并返回 камера 相关的容器或单独节点。
-
         - 非调试模式下，使用 `ComposableNodeContainer` 将 `hik_camera` 和 `img_recognizer` 两个可组合节点放入同一进程容器，
             并开启多线程执行器以提高性能。
         - 调试模式下（debug=True），以普通节点形式单独启动，便于在断点或日志中单步调试单节点。
-
         参数:
         - cam_name: 相机命名空间（例如 hik_6mm）
         - sn: 相机序列号，用于驱动识别特定硬件
@@ -147,11 +141,9 @@ def get_vision_container(cam_name: str, sn: str, camera_info_url: str):
 def get_pc_container():
         """
         构建点云处理链（Lidar 驱动 + pc_detector）以及可选的 `nn_detector` 节点。
-
         - 非调试模式下，将 `livox_v1_lidar` 和 `pc_detector` 放入可组合容器以减少进程通信开销，
             并在容器外启动 `nn_detector`（神经网络增强检测）节点，且做必要的话题重映射。
         - 调试模式下以单独节点形式启动，方便观察每个节点的日志输出。
-
         返回值: 对应要传递给 LaunchDescription 的 node/containers 列表
         """
         if not debug:
@@ -226,20 +218,18 @@ def get_pc_container():
 def generate_launch_description():
     """
     生成并返回 LaunchDescription 对象，描述本次启动所需的所有节点与静态 TF。
-
     主要包含：
     - 视觉容器 (`hik_camera` + `img_recognizer`)
     - 雷达容器 (`livox_v1_lidar` + `pc_detector`) 以及 `nn_detector`
     - 一些静态 TF 发布器（相机到雷达的外参等）
     - `pc_aligner`：点云对齐（手动对齐模式）
     - 可视化与结果输出：`marker_pub`, `target_visualizer`, `result_visualizer`
-
     注意：在 home 模式下默认启用手动配准（由 `pc_aligner` 提供），不会自动加载比赛场地的 6 点标定。
     如果回放赛事 rosbag，请使用 `use_sim_time:=true` 参数并播放 bag 时带 `--clock`。
     """
     return LaunchDescription([
         *get_vision_container(
-            'hik_6mm', '', 'package://hik_camera/config/6mm.yaml'),
+            'hik_6mm', 'DB0108949', 'package://hik_camera/config/6mm.yaml'),
         get_xyzw_tf_broadcaster(
             [
                 -0.15269233258535683,
@@ -294,7 +284,7 @@ def generate_launch_description():
             parameters=[node_params],
             output='both',
         ),
-        # judge_bridge 有串口依赖，若无裁判系统请注释此节点
+        # # judge_bridge 有串口依赖，若无裁判系统请注释此节点
         # Node(
         #     package='judge_bridge',
         #     executable='judge_bridge',

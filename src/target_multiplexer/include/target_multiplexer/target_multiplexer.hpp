@@ -65,7 +65,9 @@ private:
 
     // 用于 MapRobotData 的 ID
     static uint16_t get_robot_id(unsigned ori_id, bool target_is_blue);
+    static uint16_t mark_mask_for_type(unsigned type);
     bool is_enemy_slot(int slot_idx) const;
+    static bool mark_set(const radar_interface::msg::RadarMarkData& mark, unsigned type);
     radar_interface::msg::MatchedTarget get_match_for_slot(int slot_idx) const;
 
 public:

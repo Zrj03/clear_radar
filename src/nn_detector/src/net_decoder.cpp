@@ -569,38 +569,123 @@ void DETRDecoder::decode(int layer_index, const float *prob, std::vector<Armor> 
 }
 
 YOLOv8Decoder::YOLOv8Decoder(toml::value &config, const rclcpp::Logger& _logger) : NetDecoderBase(config, _logger) {
-    NUM_KPTS = config.at("NUM_KPTS").as_integer();
-    NUM_TSIZES = config.at("NUM_TSIZES").as_integer();
+    if (config.contains("standard_detect")) {
+        standard_detect = config.at("standard_detect").as_boolean();
+    }
+    if (standard_detect) {
+        NUM_KPTS = 4;
+        NUM_TSIZES = 0;
+        class_color_map = toml::get<std::vector<int>>(config.at("class_color_map"));
+        class_type_map = toml::get<std::vector<int>>(config.at("class_type_map"));
+        if ((int)class_color_map.size() != NUM_CLASSES || (int)class_type_map.size() != NUM_CLASSES) {
+            throw std::runtime_error("YOLOv8 standard class maps must match NUM_CLASSES");
+        }
+    } else {
+        NUM_KPTS = config.at("NUM_KPTS").as_integer();
+        NUM_TSIZES = config.at("NUM_TSIZES").as_integer();
+    }
 }
 
 void YOLOv8Decoder::set_layer_info(int layer_index, const std::vector<size_t> &dims) {
     assert((int)layers.size() == layer_index && "set_layer_info should be called in order");
     assert(dims.size() == 3 && "model should be 3-dim");
-    assert(dims[1] == 8400);
+    bool channels_first = false;
+    int num_preds = 0;
+    int num_outputs = 0;
+    if (dims[1] == 8400) {
+        num_preds = static_cast<int>(dims[1]);
+        num_outputs = static_cast<int>(dims[2]);
+    } else if (dims[2] == 8400) {
+        channels_first = true;
+        num_preds = static_cast<int>(dims[2]);
+        num_outputs = static_cast<int>(dims[1]);
+    } else {
+        throw std::runtime_error("YOLOv8 output should be [1, 8400, no] or [1, no, 8400], got " + dims_to_string(dims));
+    }
 
     // YOLOv8LayerInfo layer{
     //     .index = layer_index,
     //     .num_outputs = static_cast<int>(dims[2]),
     // };
-    YOLOv8LayerInfo layer = {layer_index, (int)dims[2], 0};
+    YOLOv8LayerInfo layer = {layer_index, num_outputs, num_preds, 0, channels_first};
 
-    RCLCPP_INFO(logger,"layer %d: num_outputs=%d", layer_index, layer.num_outputs);
+    RCLCPP_INFO(logger, "layer %d: num_preds=%d num_outputs=%d channels_first=%s",
+                layer_index, layer.num_preds, layer.num_outputs,
+                layer.channels_first ? "true" : "false");
     assert(this->check_num_outputs(layer.num_outputs) && "num_output check failed");
 
     layers.push_back(layer);
     return;
 }
 
-bool YOLOv8Decoder::check_num_outputs(int num_outputs) { return num_outputs == NUM_KPTS + NUM_CLASSES + NUM_COLORS + NUM_TSIZES; }
+bool YOLOv8Decoder::check_num_outputs(int num_outputs) {
+    if (standard_detect) {
+        return num_outputs == 4 + NUM_CLASSES;
+    }
+    return num_outputs == NUM_KPTS + NUM_CLASSES + NUM_COLORS + NUM_TSIZES;
+}
 
 void YOLOv8Decoder::decode(int layer_index, const float *prob, std::vector<Armor> &objects) {
     assert((int)layers.size() > layer_index && "layer_index out of range");
-    int no = layers[layer_index].num_outputs;
+    const auto &layer = layers[layer_index];
+    int no = layer.num_outputs;
+    int num_preds = layer.num_preds;
+
+    auto at = [&](int idx, int channel) -> float {
+        if (layer.channels_first) {
+            return prob[channel * num_preds + idx];
+        }
+        return prob[idx * no + channel];
+    };
+
+    if (standard_detect) {
+        for (int idx = 0; idx < num_preds; ++idx) {
+            int cls_id = 0;
+            float cls_best = at(idx, 4);
+            for (int c = 1; c < NUM_CLASSES; ++c) {
+                float score = at(idx, 4 + c);
+                if (score > cls_best) {
+                    cls_best = score;
+                    cls_id = c;
+                }
+            }
+            if (cls_best <= BBOX_CONF_THRESH) {
+                continue;
+            }
+
+            const float cx = at(idx, 0);
+            const float cy = at(idx, 1);
+            const float bw = at(idx, 2);
+            const float bh = at(idx, 3);
+            float x0 = std::max(0.0f, std::min(cx - bw * 0.5f, static_cast<float>(INPUT_W - 1)));
+            float y0 = std::max(0.0f, std::min(cy - bh * 0.5f, static_cast<float>(INPUT_H - 1)));
+            float x1 = std::max(0.0f, std::min(cx + bw * 0.5f, static_cast<float>(INPUT_W - 1)));
+            float y1 = std::max(0.0f, std::min(cy + bh * 0.5f, static_cast<float>(INPUT_H - 1)));
+            if (x1 <= x0 || y1 <= y0) {
+                continue;
+            }
+
+            Armor now;
+            now.pts[0] = cv::Point2f(x0, y0);
+            now.pts[1] = cv::Point2f(x1, y0);
+            now.pts[2] = cv::Point2f(x1, y1);
+            now.pts[3] = cv::Point2f(x0, y1);
+            now.pts[4] = cv::Point2f(cx, cy);
+            now.rect = cv::Rect(cv::Point2f(x0, y0), cv::Point2f(x1, y1));
+            now.conf = cls_best;
+            now.color = class_color_map[cls_id];
+            now.type = class_type_map[cls_id];
+            now.size = 0;
+            objects.push_back(now);
+        }
+        return;
+    }
+
     std::vector<float> pred_data_v;
     pred_data_v.resize(no);
     float* pred_data = pred_data_v.data();
     // [kpts(8), hot(classes)(8), hot(tsizes)(2), hot(colors)(4)]
-    for (int idx = 0; idx < 8400; ++idx) {
+    for (int idx = 0; idx < num_preds; ++idx) {
         float rough_conf = *std::max_element(&prob[idx * no + NUM_KPTS], &prob[idx * no + no]);
 
         if (rough_conf > BBOX_CONF_THRESH) {

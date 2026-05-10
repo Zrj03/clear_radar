@@ -19,6 +19,12 @@
 #include <radar_interface/msg/radar_info.hpp>
 #include <radar_interface/msg/radar_cmd.hpp>
 #include <radar_interface/msg/radar_mark_data.hpp>
+#include <radar_interface/msg/radar_link_position.hpp>
+#include <radar_interface/msg/radar_link_hp.hpp>
+#include <radar_interface/msg/radar_link_bullet.hpp>
+#include <radar_interface/msg/radar_link_coin_and_occupy.hpp>
+#include <radar_interface/msg/radar_link_buff.hpp>
+#include <radar_interface/msg/radar_link_password.hpp>
 #include <radar_interface/msg/map_robot_data.hpp>
 #include <radar_interface/msg/map_command.hpp>
 #include <radar_interface/msg/match_result.hpp>
@@ -37,6 +43,12 @@ private:
     std::unique_ptr<JudgeSerial> judge_serial;
     rclcpp::Publisher<radar_interface::msg::RadarMarkData>::SharedPtr pub_radar_mark_data;
     rclcpp::Publisher<radar_interface::msg::RadarInfo>::SharedPtr pub_radar_info;
+    rclcpp::Publisher<radar_interface::msg::RadarLinkPosition>::SharedPtr pub_radar_link_position;
+    rclcpp::Publisher<radar_interface::msg::RadarLinkHp>::SharedPtr pub_radar_link_hp;
+    rclcpp::Publisher<radar_interface::msg::RadarLinkBullet>::SharedPtr pub_radar_link_bullet;
+    rclcpp::Publisher<radar_interface::msg::RadarLinkCoinAndOccupy>::SharedPtr pub_radar_link_coin_and_occupy;
+    rclcpp::Publisher<radar_interface::msg::RadarLinkBuff>::SharedPtr pub_radar_link_buff;
+    rclcpp::Publisher<radar_interface::msg::RadarLinkPassword>::SharedPtr pub_radar_link_password;
     rclcpp::Publisher<radar_interface::team_color::msg>::SharedPtr pub_color;
     rclcpp::Publisher<std_msgs::msg::UInt16>::SharedPtr pub_remain_time;
     rclcpp::Publisher<radar_interface::msg::GameRobotHP>::SharedPtr pub_game_robot_hp;

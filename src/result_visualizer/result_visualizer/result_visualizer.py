@@ -27,7 +27,8 @@ configs = {
 # uint32 uncertainty
 
 class ResultVisualizer(Node):
-    mark = [0., 0., 0., 0., 0., 0.]
+    mark = 0
+    mark_masks = [32, 1, 2, 4, 8, 16]
 
     def __init__(self):
         super().__init__('result_visualizer')
@@ -115,11 +116,11 @@ class ResultVisualizer(Node):
                 # 绘制序号和进度
                 cv2.putText(now_img, str(num), (im_x - 10, im_y + 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                if is_red and not self.team_color and num < len(self.mark):
-                    cv2.putText(now_img, f"{self.mark[num]}/120", (im_x - 20, im_y + 40),
+                if is_red and not self.team_color and num < len(self.mark_masks) and (self.mark & self.mark_masks[num]):
+                    cv2.putText(now_img, "MARK", (im_x - 20, im_y + 40),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                if not is_red and self.team_color and num < len(self.mark):
-                    cv2.putText(now_img, f"{self.mark[num]}/120", (im_x - 20, im_y + 40),
+                if not is_red and self.team_color and num < len(self.mark_masks) and (self.mark & self.mark_masks[num]):
+                    cv2.putText(now_img, "MARK", (im_x - 20, im_y + 40),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
             except IndexError as e:
                 self.get_logger().error(f"Error in drawing: {e}")

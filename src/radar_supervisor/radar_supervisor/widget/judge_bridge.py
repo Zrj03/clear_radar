@@ -5,7 +5,8 @@ from .status_button import StatusButton, QVBoxLayout
 import rclpy
 import rclpy.qos
 from rclpy.node import Node
-from radar_interface.msg import RadarMarkData, RadarInfo, RadarCmd
+from radar_interface.msg import RadarMarkData, RadarInfo
+from std_msgs.msg import UInt8
 
 
 class JudgeBridge:
@@ -37,7 +38,7 @@ class JudgeBridge:
         self.enter_radar_cmd = False
         self.image_sub = self.node.create_subscription(
             topic='judge/radar_cmd',
-            msg_type=RadarCmd,
+            msg_type=UInt8,
             callback=self.cmd_callback,
             qos_profile=rclpy.qos.qos_profile_system_default)
         

@@ -131,12 +131,7 @@ void DvTriggerNode::hp_callback(const radar_interface::msg::GameRobotHP& hp)
 
 void DvTriggerNode::radar_mark_callback(const radar_interface::msg::RadarMarkData& mark)
 {
-    is_highlight = false;
-    for (const auto& progress : mark.mark_progress)
-        if (progress > 0) {
-            is_highlight = true;
-            return;
-        }
+    is_highlight = mark.mark_progress != 0;
 }
 
 void DvTriggerNode::map_keyboard_callback(const radar_interface::msg::MapCommand& key)

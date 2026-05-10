@@ -20,14 +20,32 @@ bool MultiplexerNode::has_nearby_detection(const radar_interface::msg::MapRobotD
 
 uint16_t MultiplexerNode::get_robot_id(unsigned ori_id, bool target_is_blue)
 {
-    constexpr uint16_t id_map[6] = { 7, 1, 2, 3, 4, 5 };
+    constexpr uint16_t id_map[6] = { 7, 1, 2, 3, 4, 6 };
     return target_is_blue ? static_cast<uint16_t>(id_map[ori_id] + 100) : id_map[ori_id];
+}
+
+uint16_t MultiplexerNode::mark_mask_for_type(unsigned type)
+{
+    constexpr uint16_t masks[6] = {
+        radar_interface::msg::RadarMarkData::SENTRY_MASK,
+        radar_interface::msg::RadarMarkData::HERO_MASK,
+        radar_interface::msg::RadarMarkData::ENGINEER_MASK,
+        radar_interface::msg::RadarMarkData::INFANTRY_3_MASK,
+        radar_interface::msg::RadarMarkData::INFANTRY_4_MASK,
+        radar_interface::msg::RadarMarkData::AERIAL_MASK,
+    };
+    return type < 6 ? masks[type] : 0;
 }
 
 bool MultiplexerNode::is_enemy_slot(int slot_idx) const
 {
     const bool slot_is_blue = slot_idx >= robot_num_per_team;
     return color == team_color::C_RED ? slot_is_blue : !slot_is_blue;
+}
+
+bool MultiplexerNode::mark_set(const radar_interface::msg::RadarMarkData& mark, unsigned type)
+{
+    return (mark.mark_progress & mark_mask_for_type(type)) != 0;
 }
 
 radar_interface::msg::MatchedTarget MultiplexerNode::get_match_for_slot(int slot_idx) const
@@ -99,7 +117,7 @@ redo:
         if (double_send_sign)           // 已经两次发送，不再发送
             double_send_sign = false;
         // 判断如果进度很小就发两次
-        else if (enemy_slot && last_mark.mark_progress[team_idx] < get_parameter("double_send_thres").as_int())
+        else if (enemy_slot && !mark_set(last_mark, team_idx))
             double_send_sign = true, stop_iter = true;
     // } else {
     //     if (blind_guess[send_idx].size() == 0){
@@ -157,7 +175,8 @@ void MultiplexerNode::radar_mark_callback(const radar_interface::msg::RadarMarkD
     }
 
     for (int i = 0; i < robot_num_per_team; ++i) {
-        int64_t diff = msg.mark_progress[i] - last_mark.mark_progress[i];
+        const bool now_marked = mark_set(msg, i);
+        const bool last_marked = mark_set(last_mark, i);
         const int enemy_slot = enemy_slot_offset + i;
 
         radar_interface::msg::FeedbackTarget fb;
@@ -166,29 +185,16 @@ void MultiplexerNode::radar_mark_callback(const radar_interface::msg::RadarMarkD
         fb.color = enemy_color;
 
         // keep_guess[i] = false;
-        // if ((diff >= 0 && msg.mark_progress[i] != 0) || msg.mark_progress[i] == radar_interface::msg::RadarMarkData::MAX_PROGRESS) {
-        //     fb.is_right = true;
-        //     RCLCPP_INFO(get_logger(), "Right map: type: %d, id: %ld, progress: %d", i, last_pub_id[i], msg.mark_progress[i]);
-        //     if (last_pub_id[i] == guessing_id)
-        //         has_guess_result = true;
-        //     else if (last_pub_id[i] < -1)   // for blind guess
-        //         keep_guess[i] = true;
-        // } else if (diff < 0 || msg.mark_progress[i] == 0) {
-        //     fb.is_right = false;
-        //     RCLCPP_DEBUG(get_logger(), "Wrong map: type: %d, id: %ld, progress: %d", i, last_pub_id[i], msg.mark_progress[i]);
-        //     if (last_pub_id[i] < -1) // for blind guess
-        //         keep_guess[i] = false;
-        // }
-        if (diff > 0) {
+        if (now_marked && !last_marked) {
             fb.is_right = true;
-            RCLCPP_INFO(get_logger(), "Right map: type: %d, id: %ld, progress: %d", i, last_pub_id[enemy_slot], msg.mark_progress[i]);
+            RCLCPP_INFO(get_logger(), "Right map: type: %d, id: %ld, mark_progress: %#x", i, last_pub_id[enemy_slot], msg.mark_progress);
             // else if (last_pub_id[i] < -1) // for blind guess
             //     keep_guess[i] = true;
             if (last_pub_id[enemy_slot] > -1)
                 fb_array.targets.push_back(fb);
         }
 
-        if (msg.mark_progress[i] == radar_interface::msg::RadarMarkData::MAX_PROGRESS)
+        if (now_marked)
             full_high_light[i] = FULL_HIGHLIGHT_STATUS::HIGHLIGHT;
         else
             full_high_light[i] = FULL_HIGHLIGHT_STATUS::NONE;
