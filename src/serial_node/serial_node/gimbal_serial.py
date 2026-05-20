@@ -16,7 +16,7 @@ class GimbalSerial(Node):
             PointStamped, '/radar/uav_target', self.callback, 10)
 
         # 声明串口参数
-        self.declare_parameter('port', '/dev/ttyACM0')
+        self.declare_parameter('port', '/dev/radar')
         self.declare_parameter('baud', 115200)
 
         self.port_name = self.get_parameter('port').value

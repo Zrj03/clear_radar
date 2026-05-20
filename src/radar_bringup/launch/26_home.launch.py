@@ -5,7 +5,9 @@ from tf2_geometry_msgs.tf2_geometry_msgs import _get_quat_from_mat, _build_affin
 
 from launch_ros.descriptions import ComposableNode
 from launch_ros.actions import ComposableNodeContainer, Node
-from launch.actions import TimerAction, Shutdown
+from launch.actions import DeclareLaunchArgument, TimerAction, Shutdown
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
 from launch import LaunchDescription
 
 import numpy as np
@@ -222,23 +224,31 @@ def generate_launch_description():
     - 视觉容器 (`hik_camera` + `img_recognizer`)
     - 雷达容器 (`livox_v1_lidar` + `pc_detector`) 以及 `nn_detector`
     - 一些静态 TF 发布器（相机到雷达的外参等）
+    33  
     - `pc_aligner`：点云对齐（手动对齐模式）
     - 可视化与结果输出：`marker_pub`, `target_visualizer`, `result_visualizer`
     注意：在 home 模式下默认启用手动配准（由 `pc_aligner` 提供），不会自动加载比赛场地的 6 点标定。
     如果回放赛事 rosbag，请使用 `use_sim_time:=true` 参数并播放 bag 时带 `--clock`。
     """
+    enable_gimbal_serial = LaunchConfiguration('enable_gimbal_serial')
+
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'enable_gimbal_serial',
+            default_value='false',
+            description='Whether to launch gimbal_serial (requires /dev/ttyACM0)'
+        ),
         *get_vision_container(
             'hik_6mm', 'DB0108949', 'package://hik_camera/config/6mm.yaml'),
         get_xyzw_tf_broadcaster(
             [
-                -0.15269233258535683,
-                1.2123996239366319,
-                -0.36915186605897177,
-                0.44803863873193683,
-                -0.5183558155623317,
-                0.5523947175419749,
-                -0.47479332630910565
+                -0.09587708690877395,
+                1.622732820680712,
+                -0.29852615824253836,
+                0.4361627116514627,
+                -0.5283868358179163,
+                0.5414874766958677,
+                -0.48719683217434323
             ], 'lidar_mid70_frame', 'hik_6mm_frame'
         ),
         *get_pc_container(),
@@ -284,14 +294,14 @@ def generate_launch_description():
             parameters=[node_params],
             output='both',
         ),
-        # # judge_bridge 有串口依赖，若无裁判系统请注释此节点
-        # Node(
-        #     package='judge_bridge',
-        #     executable='judge_bridge',
-        #     namespace='radar',
-        #     parameters=[node_params],
-        #     output='both',
-        # ),
+        # judge_bridge 有串口依赖，若无裁判系统请注释此节点
+        Node(
+            package='judge_bridge',
+            executable='judge_bridge',
+            namespace='radar',
+            parameters=[node_params],
+            output='both',
+        ),
         Node(
             package='foxglove_bridge',
             executable='foxglove_bridge',
@@ -313,5 +323,17 @@ def generate_launch_description():
             executable='camera_param_tuner',
             name='camera_param_tuner',
             output='both',
+        ),
+        # Gimbal Serial node：接收/radar/uav_target并通过串口控制云台
+        Node(
+            package='serial_node',
+            executable='gimbal_serial',
+            name='gimbal_serial',
+            condition=IfCondition(enable_gimbal_serial),
+            output='both',
+            parameters=[
+                {'port': '/dev/radar'},
+                {'baud': 115200},
+            ],
         ),
     ])

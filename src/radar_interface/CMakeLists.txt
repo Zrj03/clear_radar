@@ -20,7 +20,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Armor.msg"
   "msg/FeedbackTarget.msg"
   "msg/FeedbackTargetArray.msg"
-  "msg/judge/MapRobotData.msg"
   "msg/judge/RadarCmd.msg"
   "msg/judge/RadarInfo.msg"
   "msg/judge/RadarMarkData.msg"

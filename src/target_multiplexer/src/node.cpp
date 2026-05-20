@@ -12,12 +12,9 @@ using namespace target_multiplexer;
 MultiplexerNode::MultiplexerNode()
     : rclcpp::Node("multiplexer")
 {
-    
-
     for (int i = 0; i < 6; ++i) {
         last_match_result.red[i].id = -1;
         last_match_result.blue[i].id = -1;
-        // keep_guess[i] = false;
         // Without judge feedback, default to NONE to avoid skipping all slots.
         full_high_light[i] = FULL_HIGHLIGHT_STATUS::NONE;
     }
@@ -45,7 +42,7 @@ MultiplexerNode::MultiplexerNode()
         rclcpp::SystemDefaultsQoS(), [this](const radar_interface::msg::TargetArray& msg) {
             if (!msg.targets.empty()) {
                 last_detected = msg;
-                
+
                 return;
             }
 
@@ -56,10 +53,9 @@ MultiplexerNode::MultiplexerNode()
     team_color_sub = create_subscription<radar_interface::team_color::msg>("judge/color",
         rclcpp::SystemDefaultsQoS(), std::bind(&MultiplexerNode::team_color_callback, this, std::placeholders::_1));
 
-    map_pub = create_publisher<radar_interface::msg::MapRobotData>("judge/map_robot_data", rclcpp::SystemDefaultsQoS());
     feedback_pub = create_publisher<radar_interface::msg::FeedbackTargetArray>("matcher/feedback", rclcpp::SystemDefaultsQoS());
 
-    pub_map_timer = create_wall_timer(std::chrono::milliseconds(declare_parameter("match_send_interval", 80)),
+    multiplexer_timer = create_wall_timer(std::chrono::milliseconds(declare_parameter("match_send_interval", 80)),
         std::bind(&MultiplexerNode::multiplexer, this));
 }
 

@@ -172,9 +172,10 @@ struct robot_status_t
 
 enum INTERACTION_CMD {
     RADAR_CMD = 0x0121,
-    SENTRY_DATA = 0x0200,
+    SENTRY_DATA = 0x0201,
     MAP_KEYBOARD = 0x0202,
     UWB_DATA = 0x0203,
+    SENTRY_TARGETS = 0x0204,
 };
 
 struct robot_interaction_header_t {
@@ -197,14 +198,19 @@ struct robot_interaction_map_data_t {
     map_command_t map_cmd;
 };
 
-struct robot_interaction_sentry_data_t {
+struct robot_interaction_map_robot_data_t {
     robot_interaction_header_t header;
-    uint8_t arr_len;
-    struct robot_pos {
-        uint8_t robot_id;           
-        float pos_x;                // (m)
-        float pos_y;                // (m)
-    } custom_data[12];
+    map_robot_data_t map_robot_data;
+};
+
+struct robot_interaction_sentry_map_robot_data_t {
+    robot_interaction_header_t header;
+    struct robot_map_observation {
+        int16_t robot_id;           // recognized armor type/id, -1: unknown
+        int16_t hp;                 // -1: unknown
+        int16_t pos_x;              // cm, -1: unknown
+        int16_t pos_y;              // cm, -1: unknown
+    } robots[12];                   // same order as map_robot_data_t fields
 };
 
 struct robot_interaction_uwb_t {
@@ -220,6 +226,15 @@ struct robot_interaction_uwb_t {
     float standard_5_y;
 };
 
+struct robot_interaction_sentry_targets_t {
+    robot_interaction_header_t header;
+    uint16_t target_count;
+    struct sentry_target {
+        float x;
+        float y;
+    } targets[6];
+};
+
 static_assert(sizeof(radar_mark_data_t) == 2);
 static_assert(sizeof(radar_cmd_t) == 8);
 static_assert(sizeof(map_robot_data_t) == 48);
@@ -229,6 +244,9 @@ static_assert(sizeof(radar_link_bullet_t) == 10);
 static_assert(sizeof(radar_link_coin_and_occupy_t) == 8);
 static_assert(sizeof(radar_link_buff_t) == 36);
 static_assert(sizeof(radar_link_password_t) == 6);
+static_assert(sizeof(robot_interaction_map_robot_data_t) == 54);
+static_assert(sizeof(robot_interaction_sentry_map_robot_data_t) == 102);
+static_assert(sizeof(robot_interaction_sentry_targets_t) == 56);
 
 struct game_status_t
 { 

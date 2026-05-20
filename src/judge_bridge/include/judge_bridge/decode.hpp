@@ -15,7 +15,6 @@
 #include <radar_interface/msg/radar_link_coin_and_occupy.hpp>
 #include <radar_interface/msg/radar_link_buff.hpp>
 #include <radar_interface/msg/radar_link_password.hpp>
-#include <radar_interface/msg/map_robot_data.hpp>
 #include <radar_interface/msg/map_command.hpp>
 
 
@@ -115,11 +114,3 @@ inline radar_interface::msg::RadarLinkPassword decode_radar_link_password(const 
         rtn.password[i] = ori.password[i];
     return rtn;
 }
-
-// inline radar_interface::msg::MapRobotData decode_map_robot_data(const map_robot_data_t& ori){
-//     radar_interface::msg::MapRobotData rtn;
-//     rtn.target_robot_id = ori.target_robot_id;
-//     rtn.target_position_x = ori.target_position_x;
-//     rtn.target_position_y = ori.target_position_y;
-//     return rtn;
-// }

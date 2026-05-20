@@ -4,7 +4,6 @@
 #include <radar_interface/msg/match_result.hpp>
 #include <radar_interface/msg/target_array.hpp>
 #include <radar_interface/msg/radar_mark_data.hpp>
-#include <radar_interface/msg/map_robot_data.hpp>
 #include <radar_interface/msg/feedback_target_array.hpp>
 #include <radar_interface/team_color.hpp>
 
@@ -25,7 +24,8 @@ enum class FULL_HIGHLIGHT_STATUS {
 class MultiplexerNode : public rclcpp::Node {
 private:
     struct HeldMapTarget {
-        radar_interface::msg::MapRobotData msg;
+        double position_x = 0.0;
+        double position_y = 0.0;
         rclcpp::Time stamp;
         bool valid = false;
     };
@@ -35,10 +35,9 @@ private:
     rclcpp::Subscription<radar_interface::msg::RadarMarkData>::SharedPtr radar_mark_sub;
     rclcpp::Subscription<radar_interface::team_color::msg>::SharedPtr team_color_sub;
 
-    rclcpp::Publisher<radar_interface::msg::MapRobotData>::SharedPtr map_pub;
     rclcpp::Publisher<radar_interface::msg::FeedbackTargetArray>::SharedPtr feedback_pub;
 
-    rclcpp::TimerBase::SharedPtr pub_map_timer;
+    rclcpp::TimerBase::SharedPtr multiplexer_timer;
 
     radar_interface::msg::MatchResult last_match_result;
     radar_interface::msg::TargetArray last_detected;
@@ -46,8 +45,6 @@ private:
 
     std::array<int64_t, 12> last_pub_id;
     std::array<HeldMapTarget, 12> held_map_targets;
-    // std::array<std::vector<std::pair<float, f-loat>>, 6> blind_guess;
-    // std::array<bool, 6> keep_guess;
     std::array<FULL_HIGHLIGHT_STATUS, 6> full_high_light;
 
     // Default to C_RED to allow local testing without referee system connected
@@ -57,14 +54,12 @@ private:
 
     void radar_mark_callback(const radar_interface::msg::RadarMarkData& msg);
     void team_color_callback(const radar_interface::team_color::msg& msg);
-    bool has_nearby_detection(const radar_interface::msg::MapRobotData& held_msg, double dist_sqr_threshold) const;
+    bool has_nearby_detection(const HeldMapTarget& held_target, double dist_sqr_threshold) const;
 
     void multiplexer();
 
     // void load_blind_guess();
 
-    // 用于 MapRobotData 的 ID
-    static uint16_t get_robot_id(unsigned ori_id, bool target_is_blue);
     static uint16_t mark_mask_for_type(unsigned type);
     bool is_enemy_slot(int slot_idx) const;
     static bool mark_set(const radar_interface::msg::RadarMarkData& mark, unsigned type);

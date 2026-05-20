@@ -187,6 +187,8 @@ void DetectorNode::prepare_detector()
         { "min_new_target_points", 12 },
         { "min_new_target_confirmations", 2 },
         { "new_target_confirm_max_gap", 2 },
+        { "trail_filter_enabled", 0 },
+        { "static_smooth_enabled", 0 },
     });
     declare_parameters("target_map", std::map<std::string, double> {
         { "dist_thres", 20.0 },
@@ -198,6 +200,14 @@ void DetectorNode::prepare_detector()
         { "min_new_target_size_y", 0.08 },
         { "min_new_target_area", 0.012 },
         { "new_target_candidate_dist", 0.50 },
+        { "trail_filter_min_speed", 0.4 },
+        { "trail_filter_back_dist", 0.45 },
+        { "trail_filter_side_dist", 0.8 },
+        { "trail_filter_point_ratio", 0.55 },
+        { "static_smooth_max_speed", 0.35 },
+        { "static_smooth_radius", 0.45 },
+        { "static_smooth_alpha", 0.25 },
+        { "static_smooth_velocity_decay", 0.2 },
     });
     declare_parameters("clustering", std::map<std::string, int> {
         { "normal.min_points", 8 },

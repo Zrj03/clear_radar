@@ -2,7 +2,7 @@
 
 using namespace target_multiplexer;
 
-bool MultiplexerNode::has_nearby_detection(const radar_interface::msg::MapRobotData& held_msg, double dist_sqr_threshold) const
+bool MultiplexerNode::has_nearby_detection(const HeldMapTarget& held_target, double dist_sqr_threshold) const
 {
     if (last_detected.targets.empty()) {
         // If detector output is temporarily empty, avoid clearing all held targets at once.
@@ -10,18 +10,12 @@ bool MultiplexerNode::has_nearby_detection(const radar_interface::msg::MapRobotD
     }
 
     for (const auto& target : last_detected.targets) {
-        const double dx = target.position[0] - held_msg.target_position_x;
-        const double dy = target.position[1] - held_msg.target_position_y;
+        const double dx = target.position[0] - held_target.position_x;
+        const double dy = target.position[1] - held_target.position_y;
         if (dx * dx + dy * dy <= dist_sqr_threshold)
             return true;
     }
     return false;
-}
-
-uint16_t MultiplexerNode::get_robot_id(unsigned ori_id, bool target_is_blue)
-{
-    constexpr uint16_t id_map[6] = { 7, 1, 2, 3, 4, 6 };
-    return target_is_blue ? static_cast<uint16_t>(id_map[ori_id] + 100) : id_map[ori_id];
 }
 
 uint16_t MultiplexerNode::mark_mask_for_type(unsigned type)
@@ -80,7 +74,6 @@ void MultiplexerNode::multiplexer()
     int redo_idx = -1;
 redo:
     const int team_idx = send_idx % robot_num_per_team;
-    const bool target_is_blue = send_idx >= robot_num_per_team;
     const bool enemy_slot = is_enemy_slot(send_idx);
 
     if (redo_idx == send_idx) {
@@ -92,21 +85,18 @@ redo:
             return;
     }
 
-    radar_interface::msg::MapRobotData msg;
     const auto now = this->now();
     const auto detected_hold_ns = static_cast<int64_t>(get_parameter("detected_hold_sec").as_double() * 1e9);
     const double hold_guard_dist = get_parameter("hold_guard_dist").as_double();
     const double hold_guard_dist_sqr = hold_guard_dist * hold_guard_dist;
 
     auto last_match = get_match_for_slot(send_idx);
-    msg.target_robot_id = get_robot_id(team_idx, target_is_blue);
 
     if (last_match.id != -1) {
         // 如果存在已匹配目标
-        msg.target_position_x = last_match.position[0];
-        msg.target_position_y = last_match.position[1];
         last_pub_id[send_idx] = last_match.id;
-        held_map_targets[send_idx].msg = msg;
+        held_map_targets[send_idx].position_x = last_match.position[0];
+        held_map_targets[send_idx].position_y = last_match.position[1];
         held_map_targets[send_idx].stamp = now;
         held_map_targets[send_idx].valid = true;
 
@@ -119,39 +109,14 @@ redo:
         // 判断如果进度很小就发两次
         else if (enemy_slot && !mark_set(last_mark, team_idx))
             double_send_sign = true, stop_iter = true;
-    // } else {
-    //     if (blind_guess[send_idx].size() == 0){
-    //         NEXT
-    //     }
-    //     size_t guess_idx = 0;
-    //     if (last_pub_id[send_idx] < -1)
-    //         guess_idx = decode_idx(last_pub_id[send_idx]);
-    //     if (!keep_guess[send_idx])
-    //         ++guess_idx, keep_guess[send_idx] = true;
-    //     if (guess_idx >= blind_guess[send_idx].size())
-    //         guess_idx = 0;
-
-    //     auto guess_pos = blind_guess[send_idx][guess_idx];
-    //     if (color == team_color::C_RED)
-    //         std::swap(guess_pos.first, guess_pos.second);
-    //     msg.target_position_x = guess_pos.first;
-    //     msg.target_position_y = guess_pos.second;
-    //     last_pub_id[send_idx] = encode_idx(guess_idx);
-    //     RCLCPP_DEBUG(get_logger(), "Blind guessing for %d: %lu", send_idx, guess_idx);
-    // }
     } else if (held_map_targets[send_idx].valid
         && (now - held_map_targets[send_idx].stamp).nanoseconds() <= detected_hold_ns
-        && has_nearby_detection(held_map_targets[send_idx].msg, hold_guard_dist_sqr)) {
-        msg = held_map_targets[send_idx].msg;
-        msg.target_robot_id = get_robot_id(team_idx, target_is_blue);
+        && has_nearby_detection(held_map_targets[send_idx], hold_guard_dist_sqr)) {
         stop_iter = true;
     } else {
         held_map_targets[send_idx].valid = false;
         NEXT
     }
-
-    RCLCPP_DEBUG(get_logger(), "Map: id: %d, x: %f, y: %f", msg.target_robot_id, msg.target_position_x, msg.target_position_y);
-    map_pub->publish(msg);
 
     next_iter();
 }

@@ -29,37 +29,20 @@ private:
     };
 
     radar_interface::team_color::ENUM color;
-    radar_interface::msg::GameRobotHP last_hp;
-    std::queue<radar_interface::msg::GameRobotHP> hp_queue;
-    bool in_battle = false;
-
-    std::array<bool, 6> red_bot_in_blue, blue_bot_in_red;
-    std::set<long> bot_ignore;
-    bool is_highlight = false;
-
     bool dv_available();
-    void check_trigger();
     void trigger_dv(const std::string_view& reason = "");
-    void check_battle();
     void radar_info_callback(const radar_interface::msg::RadarInfo& info);
     void color_callback(const radar_interface::team_color::msg& color);
-    void calc_robots_count(const radar_interface::msg::MatchResult& result);
-    void hp_callback(const radar_interface::msg::GameRobotHP& hp);
     void time_callback(const std_msgs::msg::UInt16& time);
     void map_keyboard_callback(const radar_interface::msg::MapCommand& key);
-    void radar_mark_callback(const radar_interface::msg::RadarMarkData& mark);
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_custom_info;
     rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr pub_radar_cmd;
     rclcpp::Subscription<radar_interface::msg::RadarInfo>::SharedPtr sub_radar_info;
     rclcpp::Subscription<radar_interface::team_color::msg>::SharedPtr sub_team_color;
-    rclcpp::Subscription<radar_interface::msg::MatchResult>::SharedPtr sub_match_result;
-    rclcpp::Subscription<radar_interface::msg::GameRobotHP>::SharedPtr sub_hp;
     rclcpp::Subscription<std_msgs::msg::UInt16>::SharedPtr sub_time;
     rclcpp::Subscription<radar_interface::msg::MapCommand>::SharedPtr sub_key;
-    rclcpp::Subscription<radar_interface::msg::RadarMarkData>::SharedPtr sub_radar_mark;
 
 public:
     DvTriggerNode();
 };
-

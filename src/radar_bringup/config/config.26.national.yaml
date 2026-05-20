@@ -2,7 +2,7 @@
   ros__parameters:
     sample_lidar: 'lidar_mid70'
     # 初始化采样点云数目
-    init_sample: 500000
+    init_sample: 1000000
     # 对齐器采样模型点数
     mesh_sample: 1000000
     # 对齐器裁剪盒 单位: m
@@ -12,6 +12,9 @@
     max_corr_dist: 0.5
     # 最大迭代次数
     max_iteration: 20
+    # TF 续发周期：缩短缓存边界，降低extrapolation风险
+    tf_pub_interval_ms: 100
+    # 质量门槛：最小拟合率
     quality_gate.enable: True
     quality_gate.max_rmse: 0.24
     quality_gate.min_fitness: 0.70
@@ -33,7 +36,7 @@
 /radar/pc_detector:
   ros__parameters:
     # 缓冲区帧数
-    node.buffer_frame_size: 5
+    node.buffer_frame_size: 3
     node.lidars: ['lidar_mid70']
 
     mesh.mesh_ori: "rm_2026_19M.stl"
@@ -50,7 +53,7 @@
     static_map_prior.max_nn_dist: 0.18
 
     # 体素网格滤波器体素大小 单位: m
-    voxel_grid.voxel_size: 0.08
+    voxel_grid.voxel_size: 0.1
     # 膨胀的核半径大小 单位: 体素
     voxel_grid.dilate_size: 1
     # 体素网格盒大小 单位: m
@@ -63,73 +66,70 @@
     target_map.last_frames: 30
     # 跟踪 (马氏) 距离阈值
     target_map.dist_thres: 4.0
-    # # 跟踪合并跟丢阈值 单位: 帧
-    # target_map.combine_limit: 15
-    # # 跟踪合并 (马氏) 距离阈值
-    # target_map.combine_dist: 8.0
+    # 跟踪合并跟丢阈值 单位: 帧
+    target_map.combine_limit: 15
+    # 跟踪合并 (马氏) 距离阈值
+    target_map.combine_dist: 5.0
     # 强制合并距离阈值 单位: m（同一车体前后形成两个轨迹时强制合并，≈车长）
     target_map.force_combine_dist: 1.0
     # 错误合并判定跟丢阈值 单位: 帧
-    target_map.separate_limit: 8
+    target_map.separate_limit: 4
     # 跟踪框相接阈值 单位: m
     target_map.cc_thres: 0.05
     # 初始跟踪框预设丢失帧计数 单位: 帧
     target_map.init_lost: 14
     # 新目标最少点数，抑制点云碎片直接成目标
-    target_map.min_new_target_points: 20
+    target_map.min_new_target_points: 30
     # 新目标几何尺寸下限
-    target_map.min_new_target_size_x: 0.14
-    target_map.min_new_target_size_y: 0.14
-    target_map.min_new_target_area: 0.06
+    target_map.min_new_target_size_x: 0.40
+    target_map.min_new_target_size_y: 0.30
+    target_map.min_new_target_area: 0.20
     # 新目标最少连续确认帧数，降低短命 ID 抖动
-    target_map.min_new_target_confirmations: 5
+    target_map.min_new_target_confirmations: 4
     # 新目标候选允许丢帧间隔
     target_map.new_target_confirm_max_gap: 1
     # 新目标候选聚合距离
-    target_map.new_target_candidate_dist: 0.45
+    target_map.new_target_candidate_dist: 0.6
     # 投影后 Z 轴高度 单位: m
-    target_map.project_z: 0.2
+    target_map.project_z: 0.0
 
     # Z 方向压缩比例
-    clustering.z_zip: 0.2
+    clustering.z_zip: 0.5
     # (普通参数) DBSCAN 聚类算法的聚类半径 单位: m
-    clustering.normal.eps: 0.35
+    clustering.normal.eps: 0.45
     # (普通参数) DBSCAN 聚类算法的最少点阈值
-    clustering.normal.min_points: 12
+    clustering.normal.min_points: 8
     # (宽松参数) DBSCAN 聚类算法的聚类半径 单位: m
-    clustering.loose.eps: 0.45
+    clustering.loose.eps: 0.25
     # (宽松参数) DBSCAN 聚类算法的最少点阈值
-    clustering.loose.min_points: 8
+    clustering.loose.min_points: 6
     # (宽松参数) 进行宽松聚类的扩展边界 单位: m
-    clustering.loose.box_expand: 0.12
+    clustering.loose.box_expand: 0.1
     # (严格参数) DBSCAN 聚类算法的聚类半径 单位: m
     clustering.strict.eps: 0.15
     # (严格参数) DBSCAN 聚类算法的最少点阈值
-    clustering.strict.min_points: 14
+    clustering.strict.min_points: 12
 
     # 预测协方差矩阵
-    kalman_filter.q.position: 5.0e-4
-    kalman_filter.q.velocity: 1.0e-5
-    kalman_filter.q.pos_vel: 2.0e-5
+    kalman_filter.q.position: 0.00005
+    kalman_filter.q.velocity: 0.00002
+    kalman_filter.q.pos_vel: 1.0e-4
     # 观测协方差矩阵
-    kalman_filter.r.position: 8.0e-2
-    kalman_filter.r.velocity: 2.0e-1
+    kalman_filter.r.position: 4.0e-2
+    kalman_filter.r.velocity: 1.0e-1
     # 预测积累协方差更新比率
-    kalman_filter.cov_factor: 2.0
+    kalman_filter.cov_factor: 1.5
     # 速度衰减比率
-    kalman_filter.decay_rate: 1.0e-4
+    kalman_filter.decay_rate: 5.0e-4
     # 速递限制 单位: m/s
     kalman_filter.max_velocity: 10.0
     kalman_filter.stop_p_time: 40
 
 /radar/hik_6mm/hik_camera:
   ros__parameters:
-    # old camera sn: DB0108949
-    # sn: DB0108949
-    # 留空表示使用当前接入的第一台相机（更换相机时无需改 SN）
-    sn: ""
+    sn: "DB0108949"
     camera_info_url: "package://hik_camera/config/6mm.yaml"
-    exposure_time: 16000.0
+    exposure_time: 12000.0
     gain: 23.0
     digital_shift: 1.0
     frame_rate: 60.0
@@ -137,67 +137,119 @@
 
 /radar/hik_6mm/img_recognizer:
   ros__parameters:
-    sync_queue_size: 12
-    sync_max_interval: 0.25
+    sync_queue_size: 8
+    sync_max_interval: 0.10
     crop_side_length: 1600.0 # 裁剪框大小，缩小以减少背景混入
-    crop_center_up_bias_ratio: 0.00
-    crop_center_right_bias_ratio: 0.00
+    crop_center_up_bias_ratio: -0.03 # 负值表示将点云投影裁剪框向图像下方移动
+    crop_center_right_bias_ratio: -0.04 # 负值表示将点云投影裁剪框向图像左侧移动
     img_compressed: False
-    jigsaw_size: 3
-    img_size: 384
+    jigsaw_size: 2
+    img_size: 640
     dump_weak_frames: false
     weak_frame_dump_dir: "/tmp/recognizer_weak_frames"
-    weak_frame_dump_every_n: 30
-    armor_detector_config: "models/armor.toml"
+    weak_frame_dump_every_n: 5
+    armor_detector_config: "models/armor_v8.toml"
     enable_imshow: True
+
+    #敌方哨站固定位置灯条检测
+    enemy_outpost_detection_enabled: true
+    enemy_outpost_x: 17.581
+    enemy_outpost_y: 11.902
+    enemy_outpost_z: 1.870
+    enemy_outpost_target_id: 900001
+    enemy_outpost_alive_topic: "/radar/judge/enemy_outpost_alive"
+    enemy_outpost_min_light_pixels: 30
+    enemy_outpost_min_light_ratio: 0.001
+    enemy_outpost_min_saturation: 80
+    enemy_outpost_min_value: 160
+    team_color_topic: "/radar/judge/color"
+    default_team_color: "blue"
+
+    #哨兵目标检测
+    sentry_targets_enabled: true
+    sentry_targets_topic: "/radar/judge/sentry_targets"
+    sentry_targets_timeout_ms: 500
+    sentry_targets_default_z: 0.8
+
 
 /radar/nn_detector:
   ros__parameters:
-    armor_detector_config: "models/armor.toml"
+    armor_detector_config: "models/armor_v8.toml"
     enable_imshow: true
     debug: false
 
 /radar/matcher:
   ros__parameters:
     img_ns: ['/radar/hik_6mm']
-    value_max: 15000
-    value_inc: 60
-    value_dec: 8
+    value_max: 10000
+    value_inc: 70
+    value_dec: 10
     value_fail_dec: 4
-    value_match_limit: 60
-    fail_dec_min: 20
+    value_match_limit: 120
+    fail_dec_min: 10
     feedback_inc: 1200
-    feedback_dec: 400
+    feedback_dec: 15
     pos_reinforce_inc: 15
+
     # 位置强化半径，用于视觉点云关联
     pos_reinforce_max: 80
     pos_reinforce_timeout: 300
-    pub_timeout: 150
+    pub_timeout: 50
     vis_per_pub: 1
-    uncertainty_limit: 30
-    require_recent_visual: true
-    visual_confirm_timeout_ms: 400
-    min_visual_confirmations: 2
-    assignment_hold_ms: 500
+
+    uncertainty_limit: 60
+    require_recent_visual: false
+    visual_confirm_timeout_ms: 350
+    min_visual_confirmations: 1
+    assignment_hold_ms: 1800
+    async_identity_fusion: true
+    identity_hold_ms: 2500
+    identity_stale_value_dec: 1
     infantry_assignment_stickiness_bonus: 450
-    infantry_dominance_lock_margin: 1000
-    slot_switch_guard_ms: 500
-    slot_switch_confirmations: 3
-    slot_switch_score_margin: 400
+    infantry_dominance_lock_margin: 800
+    slot_switch_guard_ms: 200
+    slot_switch_confirmations: 2
+    slot_switch_score_margin: 250
     # 增加同色间距限制，减少拥挤时的 ID 交换（0.6 -> 1.0）
-    same_color_min_separation: 0.8
+    same_color_min_separation: 0.6
+    default_team_color: blue
+
+    enemy_lost_mark_enabled: true
+    enemy_lost_mark_rect_min_x: 6.0
+    enemy_lost_mark_rect_min_y: 10.0
+    enemy_lost_mark_rect_max_x: 11.5
+    enemy_lost_mark_rect_max_y: 14.0
+
+    enemy_lost_mark_circle_x: 12.66
+    enemy_lost_mark_circle_y: 15.0
+    enemy_lost_mark_circle_radius: 0.5
+
+    enemy_lost_mark_x: 4.0
+    enemy_lost_mark_y: 14.0
+    enemy_lost_mark_radius: 1.5
+    enemy_lost_mark_hold_ms: 1000
 
 /radar/multiplexer:
   ros__parameters:
     default_team_color: blue
     match_send_interval: 10
-    detected_hold_sec: 1.5
-    hold_guard_dist: 0.8
+    detected_hold_sec: 0.5
+    hold_guard_dist: 0.35
     double_send_thres: 80
 
 /radar/judge_bridge:
   ros__parameters:
     enable_recorder: True
+    # Sentry warning/watch-zone parameters disabled.
+    # enemy_watch_zone_enabled: true
+    # enemy_watch_zone_x: 15.76
+    # enemy_watch_zone_y: 14.0
+    # enemy_watch_zone_radius: 1.0
+    # enemy_watch_zone_alert_interval_ms: 50
+    enemy_outpost_custom_info_interval_ms: 1000
+    enemy_outpost_alive_topic: "judge/enemy_outpost_alive"
+    sentry_target_base_id: 800000
+    sentry_target_default_z: 0.8
 
 
 /radar/lidar_mid70/livox_v1_lidar:

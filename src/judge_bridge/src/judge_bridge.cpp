@@ -21,6 +21,8 @@
 #include <locale>
 #include <cstdint>
 #include <functional>
+#include <iterator>
+#include <limits>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/qos.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -52,6 +54,45 @@ std::vector<std::string> get_serial_port_candidates(const std::string& configure
     std::sort(ports.begin(), ports.end());
     return ports;
 }
+
+int16_t clamp_to_i16(long value)
+{
+    return static_cast<int16_t>(std::clamp<long>(
+        value, std::numeric_limits<int16_t>::min(), std::numeric_limits<int16_t>::max()));
+}
+
+int observation_order_offset_from_armor_type(int64_t type)
+{
+    switch (type) {
+    case radar_interface::msg::Armor::TYPE_HERO:
+        return 0;
+    case radar_interface::msg::Armor::TYPE_ENGINEER:
+        return 1;
+    case radar_interface::msg::Armor::TYPE_INF_3:
+        return 2;
+    case radar_interface::msg::Armor::TYPE_INF_4:
+        return 3;
+    case radar_interface::msg::Armor::TYPE_INF_5:
+        return 4;
+    case radar_interface::msg::Armor::TYPE_SENTRY:
+        return 5;
+    default:
+        return -1;
+    }
+}
+
+team_color::ENUM team_color_from_armor_color(int64_t armor_color)
+{
+    switch (armor_color) {
+    case radar_interface::msg::Armor::COLOR_RED:
+        return team_color::C_RED;
+    case radar_interface::msg::Armor::COLOR_BLUE:
+        return team_color::C_BLUE;
+    default:
+        return team_color::UNKNOWN;
+    }
+}
+
 }
 
 
@@ -176,6 +217,30 @@ void JudgeBridgeNode::send_custom_info(const std::string& str)
     judge_serial->write(CMD_ID::SEND_CUSTOM_INFO, reinterpret_cast<uint8_t*>(&custom_info), sizeof(custom_info));
 }
 
+void JudgeBridgeNode::enemy_outpost_alive_callback(const std_msgs::msg::Bool& msg)
+{
+    enemy_outpost_alive = msg.data;
+    has_enemy_outpost_visual_state = true;
+
+    const int interval_ms = get_parameter("enemy_outpost_custom_info_interval_ms").as_int();
+    const auto now = get_clock()->now();
+    const bool state_changed = !has_last_enemy_outpost_custom_info ||
+        msg.data != last_enemy_outpost_custom_info_alive;
+    const bool interval_elapsed = interval_ms >= 0 &&
+        (!has_last_enemy_outpost_custom_info ||
+            (now - last_enemy_outpost_custom_info_time).nanoseconds() >=
+                static_cast<int64_t>(interval_ms) * 1000 * 1000);
+
+    if (!state_changed && !interval_elapsed)
+        return;
+
+    send_custom_info(msg.data ? "OP ALIVE" : "OP DOWN");
+    has_last_enemy_outpost_custom_info = true;
+    last_enemy_outpost_custom_info_alive = msg.data;
+    last_enemy_outpost_custom_info_time = now;
+    RCLCPP_INFO(get_logger(), "Enemy outpost visual state forwarded: %s", msg.data ? "alive" : "down");
+}
+
 void JudgeBridgeNode::map_command_callback(const map_command_t& cmd)
 {
     RCLCPP_INFO(get_logger(), "keyboard: %#x "
@@ -219,6 +284,8 @@ void JudgeBridgeNode::robot_status_callback(const robot_status_t& robot_data)
 void JudgeBridgeNode::game_status_callback(const game_status_t& status)
 {
     RCLCPP_INFO(get_logger(), "game_status: game_type_and_progress: %d, remain_time: %d", status.game_type_and_progress, status.stage_remain_time);
+    has_game_status = true;
+    remaining_steps = clamp_to_i16(static_cast<long>(status.stage_remain_time) * 5);
     if ((status.game_type_and_progress >> 4) == 4)
     {
         RCLCPP_INFO(get_logger(), "game in battle");
@@ -238,6 +305,28 @@ void JudgeBridgeNode::game_status_callback(const game_status_t& status)
  */
 void JudgeBridgeNode::game_robot_hp_callback(const game_robot_HP_t& hp)
 {
+    has_game_robot_hp = true;
+    red_robot_hp = {
+        clamp_to_i16(hp.red_sentry_robot_HP),
+        clamp_to_i16(hp.red_hero_robot_HP),
+        clamp_to_i16(hp.red_engineer_robot_HP),
+        clamp_to_i16(hp.red_standard_3_robot_HP),
+        clamp_to_i16(hp.red_standard_4_robot_HP),
+        clamp_to_i16(hp.red_standard_5_robot_HP),
+    };
+    red_outpost_hp = clamp_to_i16(hp.red_outpost_HP);
+    red_base_hp = clamp_to_i16(hp.red_base_HP);
+    blue_robot_hp = {
+        clamp_to_i16(hp.blue_sentry_robot_HP),
+        clamp_to_i16(hp.blue_hero_robot_HP),
+        clamp_to_i16(hp.blue_engineer_robot_HP),
+        clamp_to_i16(hp.blue_standard_3_robot_HP),
+        clamp_to_i16(hp.blue_standard_4_robot_HP),
+        clamp_to_i16(hp.blue_standard_5_robot_HP),
+    };
+    blue_outpost_hp = clamp_to_i16(hp.blue_outpost_HP);
+    blue_base_hp = clamp_to_i16(hp.blue_base_HP);
+
     msg::GameRobotHP msg;
     msg.red_robot_hp = {
         hp.red_sentry_robot_HP,
@@ -301,27 +390,110 @@ void JudgeBridgeNode::interaction_data_callback(const std::vector<uint8_t>& data
         pub_uwb_data->publish(msg);
         RCLCPP_INFO(get_logger(), "UWB Received");
     }
+    else if (header->data_cmd_id == INTERACTION_CMD::SENTRY_TARGETS)
+    {
+        if (data.size() < sizeof(robot_interaction_sentry_targets_t)) {
+            RCLCPP_WARN(get_logger(), "Sentry targets packet too short: %zu", data.size());
+            return;
+        }
+        auto sentry_targets = reinterpret_cast<const robot_interaction_sentry_targets_t*>(data.data());
+        sentry_targets_callback(*sentry_targets);
+    }
 }
 
-/**
- * 功能: 周期性向哨兵发送全场目标位置信息
- * 参数: topic_message - MatchResult消息(包含红蓝两队目标信息)
- * 通信: 
- *   - 把红蓝两队所有有效目标位置打包为robot_interaction_sentry_data_t结构体
- *   - 每个单位存储: robot_id, pos_x(单位m), pos_y(单位m)
- *   - 最多12个单位(对应6*2队)
- *   - 通过CMD_ID::INTERACTION_DATA命令发送给哨兵
- */
-void JudgeBridgeNode::send_sentry_data(const radar_interface::msg::MatchResult& topic_message)
+void JudgeBridgeNode::sentry_targets_callback(const robot_interaction_sentry_targets_t& sentry_targets)
 {
-    if (color == team_color::UNKNOWN)
+    radar_interface::msg::TargetArray msg;
+    msg.header.stamp = now();
+    msg.header.frame_id = "world";
+
+    const uint16_t max_count = sizeof(sentry_targets.targets) / sizeof(sentry_targets.targets[0]);
+    const uint16_t target_count = std::min<uint16_t>(sentry_targets.target_count, max_count);
+    const auto base_id = static_cast<uint64_t>(get_parameter("sentry_target_base_id").as_int());
+    const double default_z = get_parameter("sentry_target_default_z").as_double();
+
     {
-        RCLCPP_WARN(get_logger(), "Unkown Color!");
-        return;
+        std::lock_guard<std::mutex> lock(sentry_observation_mutex);
+        has_sentry_targets_packet = target_count > 0;
+        latest_sentry_target_count = target_count;
+        for (auto& slot : sentry_observation_slots)
+            slot = {};
     }
-    // 构建发往哨兵的数据包
-    robot_interaction_sentry_data_t interaction_data;
-    interaction_data.header.data_cmd_id = INTERACTION_CMD::SENTRY_DATA;
+
+    msg.targets.reserve(target_count);
+    for (uint16_t i = 0; i < target_count; ++i) {
+        radar_interface::msg::Target target;
+        target.id = base_id + i;
+        target.position[0] = sentry_targets.targets[i].x;
+        target.position[1] = sentry_targets.targets[i].y;
+        target.calc_z = default_z;
+        target.observed_pos[0] = target.position[0];
+        target.observed_pos[1] = target.position[1];
+        target.observed_pos[2] = target.calc_z;
+        msg.targets.push_back(target);
+    }
+
+    pub_sentry_targets->publish(msg);
+    RCLCPP_INFO_THROTTLE(
+        get_logger(), *get_clock(), 1000,
+        "Sentry targets received: count=%u", target_count);
+}
+
+void JudgeBridgeNode::detected_targets_callback(const radar_interface::msg::DetectedTargetArray& detected_targets)
+{
+    const auto base_id = static_cast<uint64_t>(get_parameter("sentry_target_base_id").as_int());
+    std::lock_guard<std::mutex> lock(sentry_observation_mutex);
+    if (color == team_color::UNKNOWN)
+        return;
+
+    bool has_navigation_detection = false;
+    for (const auto& detected_target : detected_targets.targets) {
+        if (detected_target.target.id < base_id)
+            continue;
+        const uint64_t nav_idx = detected_target.target.id - base_id;
+        if (has_sentry_targets_packet && nav_idx >= latest_sentry_target_count)
+            continue;
+        has_navigation_detection = true;
+        break;
+    }
+
+    if (!has_navigation_detection)
+        return;
+
+    for (auto& slot : sentry_observation_slots)
+        slot = {};
+
+    for (const auto& detected_target : detected_targets.targets) {
+        if (detected_target.target.id < base_id)
+            continue;
+        const uint64_t nav_idx = detected_target.target.id - base_id;
+        if (has_sentry_targets_packet && nav_idx >= latest_sentry_target_count)
+            continue;
+
+        const int order_offset = observation_order_offset_from_armor_type(detected_target.type);
+        const auto target_color = team_color_from_armor_color(detected_target.color);
+        if (order_offset < 0 || target_color == team_color::UNKNOWN)
+            continue;
+
+        const bool is_opponent = target_color != color.load();
+        const size_t slot_idx = static_cast<size_t>(order_offset + (is_opponent ? 0 : 6));
+        auto& slot = sentry_observation_slots[slot_idx];
+        slot.recognized = true;
+        slot.robot_id = clamp_to_i16(detected_target.type);
+        slot.pos_x = detected_target.target.position[0];
+        slot.pos_y = detected_target.target.position[1];
+    }
+
+    RCLCPP_INFO_THROTTLE(
+        get_logger(), *get_clock(), 1000,
+        "Sentry observation targets recognized and staged for sentry packet.");
+}
+
+robot_interaction_sentry_map_robot_data_t JudgeBridgeNode::build_sentry_map_observation_data(
+    INTERACTION_CMD data_cmd_id) const
+{
+    robot_interaction_sentry_map_robot_data_t interaction_data {};
+    interaction_data.header.data_cmd_id = data_cmd_id;
 
     switch (color) {
     case team_color::C_RED:
@@ -333,50 +505,51 @@ void JudgeBridgeNode::send_sentry_data(const radar_interface::msg::MatchResult& 
         interaction_data.header.receiver_id = SENTRY_ID[team_color::C_BLUE];
         break;
     default:
-        RCLCPP_WARN_ONCE(get_logger(), "Unknow the radar color");
-        return;
+        return interaction_data;
     }
-    uint8_t len = 0;
 
-    // 遍历红队所有6个单位，依次添加有效的目标位置
-    for (uint8_t index = 0; index < topic_message.red.size(); index++)
+    for (auto& robot : interaction_data.robots) {
+        robot.robot_id = UNKNOWN_OBS_VALUE;
+        robot.hp = UNKNOWN_OBS_VALUE;
+        robot.pos_x = UNKNOWN_OBS_VALUE;
+        robot.pos_y = UNKNOWN_OBS_VALUE;
+    }
+
+    const auto& opponent_hp = color == team_color::C_RED ? blue_robot_hp : red_robot_hp;
+    const auto& ally_hp = color == team_color::C_RED ? red_robot_hp : blue_robot_hp;
+    std::array<SentryObservationSlot, 12> observation_slots {};
     {
-        const auto& red = topic_message.red[index];
-        if (red.id == -1)
-            continue;
-        interaction_data.custom_data[len].robot_id = RED_ROBOT[index];
-        interaction_data.custom_data[len].pos_x = red.position[0];
-        interaction_data.custom_data[len].pos_y = red.position[1];
-        ++len;
+        std::lock_guard<std::mutex> lock(sentry_observation_mutex);
+        observation_slots = sentry_observation_slots;
     }
 
-    // 遍历蓝队所有6个单位，依次添加有效的目标位置
-    for (uint8_t index = 0; index < topic_message.blue.size(); index++)
-    {
-        const auto& blue = topic_message.blue[index];
-        if (blue.id == -1)
-            continue;
-        interaction_data.custom_data[len].robot_id = BLUE_ROBOT[index];
-        interaction_data.custom_data[len].pos_x = blue.position[0];
-        interaction_data.custom_data[len].pos_y = blue.position[1];
-        ++len;
+    auto fill_robot = [&](size_t out_idx, const auto& hp_values, size_t hp_idx) {
+        if (out_idx >= std::size(interaction_data.robots))
+            return;
+
+        auto& robot = interaction_data.robots[out_idx];
+        robot.hp = has_game_robot_hp && hp_idx < hp_values.size() ? hp_values[hp_idx] : UNKNOWN_OBS_VALUE;
+
+        const auto& slot = observation_slots[out_idx];
+        if (!slot.recognized)
+            return;
+
+        robot.robot_id = slot.robot_id;
+        robot.pos_x = clamp_to_i16(std::lround(slot.pos_x * POSITION_SCALE));
+        robot.pos_y = clamp_to_i16(std::lround(slot.pos_y * POSITION_SCALE));
+    };
+
+    constexpr std::array<size_t, 6> map_hp_order {1, 2, 3, 4, 5, 0};
+    for (size_t i = 0; i < map_hp_order.size(); ++i) {
+        const size_t hp_idx = map_hp_order[i]; // hero, engineer, infantry3, infantry4, aerial/standard5, sentry.
+        fill_robot(i, opponent_hp, hp_idx);
+        fill_robot(i + 6, ally_hp, hp_idx);
     }
 
-    interaction_data.arr_len = len;
-    judge_serial->write(CMD_ID::INTERACTION_DATA, reinterpret_cast<uint8_t*>(&interaction_data),
-        sizeof(robot_interaction_sentry_data_t) - (12 - len) * sizeof(robot_interaction_sentry_data_t::robot_pos));
+    return interaction_data;
 }
 
-/**
- * 功能: 向哨兵发送敌方入侵警报
- * 参数: msg - MatchResult消息(包含敌我双方目标)
- * 说明:
- *   - 只标记已确认进入我方半场的敌方单位
- *   - 根据雷达相对坐标系，我方防区始终在近端(x < 12)
- *   - 只发送有效目标(id != -1)且x∈(0, 12)的敌人信息
- *   - 最多发送12个入侵敌人的信息
- */
-void JudgeBridgeNode::send_invasion_alert(const radar_interface::msg::MatchResult& msg)
+void JudgeBridgeNode::write_sentry_map_observation_data()
 {
     if (color == team_color::UNKNOWN)
     {
@@ -384,12 +557,25 @@ void JudgeBridgeNode::send_invasion_alert(const radar_interface::msg::MatchResul
         return;
     }
 
-    // 构建警报数据包，使用同一格式的robot_interaction_sentry_data_t
-    robot_interaction_sentry_data_t interaction_data;
-    interaction_data.header.data_cmd_id = INTERACTION_CMD::SENTRY_DATA;
+    auto interaction_data = build_sentry_map_observation_data();
+    judge_serial->write(CMD_ID::INTERACTION_DATA, reinterpret_cast<uint8_t*>(&interaction_data), sizeof(interaction_data));
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+        "Sent sentry map observation data: cmd_id=0x%04x data_cmd_id=0x%04x sender_id=%u receiver_id=%u len=%zu",
+        static_cast<unsigned>(CMD_ID::INTERACTION_DATA),
+        static_cast<unsigned>(interaction_data.header.data_cmd_id),
+        static_cast<unsigned>(interaction_data.header.sender_id),
+        static_cast<unsigned>(interaction_data.header.receiver_id),
+        sizeof(interaction_data));
+}
 
-    switch (color)
-    {
+robot_interaction_map_robot_data_t JudgeBridgeNode::build_sentry_map_robot_data(
+    const map_robot_data_t& map_robot_data) const
+{
+    robot_interaction_map_robot_data_t interaction_data {};
+    interaction_data.header.data_cmd_id = INTERACTION_CMD::SENTRY_DATA;
+    interaction_data.map_robot_data = map_robot_data;
+
+    switch (color) {
     case team_color::C_RED:
         interaction_data.header.sender_id = RADAR_ID::R_RED;
         interaction_data.header.receiver_id = SENTRY_ID[team_color::C_RED];
@@ -399,7 +585,60 @@ void JudgeBridgeNode::send_invasion_alert(const radar_interface::msg::MatchResul
         interaction_data.header.receiver_id = SENTRY_ID[team_color::C_BLUE];
         break;
     default:
-        RCLCPP_WARN_ONCE(get_logger(), "Unknow the radar color");
+        break;
+    }
+
+    return interaction_data;
+}
+
+void JudgeBridgeNode::write_sentry_map_robot_data(const map_robot_data_t& map_robot_data)
+{
+    if (color == team_color::UNKNOWN)
+    {
+        RCLCPP_WARN(get_logger(), "Unkown Color!");
+        return;
+    }
+
+    auto interaction_data = build_sentry_map_robot_data(map_robot_data);
+    judge_serial->write(CMD_ID::INTERACTION_DATA, reinterpret_cast<uint8_t*>(&interaction_data), sizeof(interaction_data));
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+        "Sent sentry map data: cmd_id=0x%04x data_cmd_id=0x%04x sender_id=%u receiver_id=%u len=%zu",
+        static_cast<unsigned>(CMD_ID::INTERACTION_DATA),
+        static_cast<unsigned>(interaction_data.header.data_cmd_id),
+        static_cast<unsigned>(interaction_data.header.sender_id),
+        static_cast<unsigned>(interaction_data.header.receiver_id),
+        sizeof(interaction_data));
+}
+
+/**
+ * 功能: 周期性向哨兵发送观察空间数据
+ * 参数: topic_message - MatchResult消息(包含红蓝两队目标信息)
+ * 通信: 
+ *   - 数据包结构在裁判系统 map_robot_data_t 的12个坐标槽位基础上增加 id 和 hp
+ *   - robots 为12台机器人[id,hp,x,y]，顺序与 map_robot_data_t 完全一致
+ *   - 位置按厘米定点数发送，未识别目标使用-1
+ *   - 通过CMD_ID::INTERACTION_DATA命令发送给哨兵
+ */
+void JudgeBridgeNode::send_sentry_data(const radar_interface::msg::MatchResult& topic_message)
+{
+    (void)topic_message;
+    write_sentry_map_observation_data();
+}
+
+#if 0
+/**
+ * 功能: 向哨兵发送敌方入侵警报
+ * 参数: msg - MatchResult消息(包含敌我双方目标)
+ * 说明:
+ *   - 检测到敌方进入我方半场时，额外发送一帧观察空间数据
+ *   - 根据雷达相对坐标系，我方防区始终在近端(x < 12)
+ *   - 触发条件为有效敌方目标(id != -1)且x∈(0, 12)
+ */
+void JudgeBridgeNode::send_invasion_alert(const radar_interface::msg::MatchResult& msg)
+{
+    if (color == team_color::UNKNOWN)
+    {
+        RCLCPP_WARN(get_logger(), "Unkown Color!");
         return;
     }
 
@@ -419,9 +658,6 @@ void JudgeBridgeNode::send_invasion_alert(const radar_interface::msg::MatchResul
             // 只记录距离我方雷达站较近的入场敌人(x < 12)
             if (enemy.position[0] <= 0.0 || enemy.position[0] >= invade_x_threshold)
                 continue;
-            interaction_data.custom_data[len].robot_id = BLUE_ROBOT[index];
-            interaction_data.custom_data[len].pos_x = enemy.position[0];
-            interaction_data.custom_data[len].pos_y = enemy.position[1];
             ++len;
         }
     }
@@ -436,9 +672,6 @@ void JudgeBridgeNode::send_invasion_alert(const radar_interface::msg::MatchResul
             // 因为雷达站位置随阵营转变，我方防守区域始终是相对较小的正x坐标
             if (enemy.position[0] <= 0.0 || enemy.position[0] >= invade_x_threshold)
                 continue;
-            interaction_data.custom_data[len].robot_id = RED_ROBOT[index];
-            interaction_data.custom_data[len].pos_x = enemy.position[0];
-            interaction_data.custom_data[len].pos_y = enemy.position[1];
             ++len;
         }
     }
@@ -447,9 +680,8 @@ void JudgeBridgeNode::send_invasion_alert(const radar_interface::msg::MatchResul
         return;
     // 如果没有任何敌人进入，则本次不发送警报
 
-    interaction_data.arr_len = len;
-    judge_serial->write(CMD_ID::INTERACTION_DATA, reinterpret_cast<uint8_t*>(&interaction_data),
-        sizeof(robot_interaction_sentry_data_t) - (12 - len) * sizeof(robot_interaction_sentry_data_t::robot_pos));
+    (void)msg;
+    // Warning packet disabled; sentry receives only normal target sync.
 }
 
     /**
@@ -501,21 +733,112 @@ void JudgeBridgeNode::check_enemy_invasion(const radar_interface::msg::MatchResu
 }
 
 /**
+ * 功能: 当指定观察点附近出现敌方单位时，向我方哨兵发送该敌方位置
+ * 默认观察点: x=15.76, y=14.0，半径1.0m
+ * 说明: 命中观察点后额外发送一帧观察空间数据
+ */
+void JudgeBridgeNode::send_enemy_watch_zone_alert(const radar_interface::msg::MatchResult& msg)
+{
+    if (color == team_color::UNKNOWN)
+    {
+        RCLCPP_WARN(get_logger(), "Unkown Color!");
+        return;
+    }
+
+    const double watch_x = get_parameter("enemy_watch_zone_x").as_double();
+    const double watch_y = get_parameter("enemy_watch_zone_y").as_double();
+    const double watch_radius = get_parameter("enemy_watch_zone_radius").as_double();
+    const double radius_sqr = watch_radius * watch_radius;
+
+    uint8_t len = 0;
+    auto add_nearby_enemy = [&](const auto& enemies) {
+        for (uint8_t index = 0; index < enemies.size() && len < 12; ++index)
+        {
+            const auto& enemy = enemies[index];
+            if (enemy.id == -1)
+                continue;
+
+            const double dx = enemy.position[0] - watch_x;
+            const double dy = enemy.position[1] - watch_y;
+            if (dx * dx + dy * dy > radius_sqr)
+                continue;
+
+            ++len;
+        }
+    };
+
+    if (color == team_color::C_RED)
+        add_nearby_enemy(msg.blue);
+    else
+        add_nearby_enemy(msg.red);
+
+    if (len == 0)
+        return;
+
+    (void)msg;
+    // Warning packet disabled; sentry receives only normal target sync.
+}
+
+void JudgeBridgeNode::check_enemy_watch_zone(const radar_interface::msg::MatchResult& msg)
+{
+    if (color == team_color::UNKNOWN || !get_parameter("enemy_watch_zone_enabled").as_bool())
+        return;
+
+    static rclcpp::Time last_alert_time(0, 0, get_clock()->get_clock_type());
+    const int64_t alert_interval_ms = std::max<int64_t>(
+        0, get_parameter("enemy_watch_zone_alert_interval_ms").as_int());
+    const double watch_x = get_parameter("enemy_watch_zone_x").as_double();
+    const double watch_y = get_parameter("enemy_watch_zone_y").as_double();
+    const double watch_radius = get_parameter("enemy_watch_zone_radius").as_double();
+    const double radius_sqr = watch_radius * watch_radius;
+
+    bool seen = false;
+    auto has_nearby_enemy = [&](const auto& enemies) {
+        for (const auto& enemy : enemies)
+        {
+            if (enemy.id == -1)
+                continue;
+
+            const double dx = enemy.position[0] - watch_x;
+            const double dy = enemy.position[1] - watch_y;
+            if (dx * dx + dy * dy <= radius_sqr)
+                return true;
+        }
+        return false;
+    };
+
+    if (color == team_color::C_RED)
+        seen = has_nearby_enemy(msg.blue);
+    else if (color == team_color::C_BLUE)
+        seen = has_nearby_enemy(msg.red);
+
+    if (!seen)
+        return;
+
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000,
+        "Enemy seen near watch zone (%.2f, %.2f), sending position to sentry.",
+        watch_x, watch_y);
+    if ((now() - last_alert_time).nanoseconds() >= alert_interval_ms * 1000000LL)
+    {
+        send_enemy_watch_zone_alert(msg);
+        last_alert_time = now();
+    }
+}
+#endif
+
+/**
  * 功能: 向地图和显示系统发送敌方机器人的实时位置
  * 参数: msg - MatchResult消息(包含敌方6个单位的坐标)
  * 处理流程:
- *   1. 调用check_enemy_invasion()检测敌方是否进入我方半场
- *   2. 将敌方机器人位置单位从(米)转换为地图坐标单位(厘米)
- *   3. 为离线/死亡的机器人设置默认位置(对角坐标，避免地图显示异常)
- *   4. 通过CMD_ID::ROBOT_MAP命令发送给裁判系统(供地图和UI显示)
+ *   1. 将敌方机器人位置单位从(米)转换为地图坐标单位(厘米)
+ *   2. 为离线/死亡的机器人设置默认位置(对角坐标，避免地图显示异常)
+ *   3. 通过CMD_ID::ROBOT_MAP命令发送给裁判系统(供地图和UI显示)
  * 说明: 地图类型区分：
  *   - 红队：对手(蓝队)位置，默认位置为右下角(2590, 1390)
  *   - 蓝队：对手(红队)位置，默认位置为左上角(210, 110)
  */
-void JudgeBridgeNode::send_map_robot_data(const radar_interface::msg::MatchResult& msg)
+map_robot_data_t JudgeBridgeNode::build_map_robot_data(const radar_interface::msg::MatchResult& msg) const
 {
-    check_enemy_invasion(msg);
-
     map_robot_data_t map_robot_data {};
     auto to_cm = [](double meters) -> uint16_t {
         const auto centimeters = std::lround(meters * 100.0);
@@ -563,8 +886,22 @@ void JudgeBridgeNode::send_map_robot_data(const radar_interface::msg::MatchResul
         break;
     }
     default:
-        return;
+        break;
     }
+
+    return map_robot_data;
+}
+
+void JudgeBridgeNode::send_map_robot_data(const radar_interface::msg::MatchResult& msg)
+{
+    // Sentry warning features are disabled: no half-field or watch-zone alerts.
+    // check_enemy_invasion(msg);
+    // check_enemy_watch_zone(msg);
+
+    if (color == team_color::UNKNOWN)
+        return;
+
+    auto map_robot_data = build_map_robot_data(msg);
     // 序列化位置数据并通过串口发送给裁判系统
     judge_serial->write(CMD_ID::ROBOT_MAP, reinterpret_cast<uint8_t*>(&map_robot_data), sizeof(map_robot_data));
 }
@@ -644,6 +981,17 @@ JudgeBridgeNode::JudgeBridgeNode()
     declare_parameter("enable_recorder", false);
     declare_parameter("radar_password_cmd", 0);
     declare_parameter("radar_password", "000000");
+    // Sentry warning/watch-zone parameters disabled.
+    // declare_parameter("enemy_watch_zone_enabled", true);
+    // declare_parameter("enemy_watch_zone_x", 15.76);
+    // declare_parameter("enemy_watch_zone_y", 14.0);
+    // declare_parameter("enemy_watch_zone_radius", 1.0);
+    // declare_parameter("enemy_watch_zone_alert_interval_ms", 300);
+    declare_parameter("enemy_outpost_custom_info_interval_ms", 1000);
+    declare_parameter("enemy_outpost_alive_topic", "judge/enemy_outpost_alive");
+    declare_parameter("sentry_target_base_id", 800000);
+    declare_parameter("sentry_target_default_z", 0.8);
+    declare_parameter("sentry_detected_targets_topic", "/radar/img_recognizer/detected_targets");
     
     // ============ 初始化串口 ============
     init_serial();
@@ -663,12 +1011,21 @@ JudgeBridgeNode::JudgeBridgeNode()
     pub_game_robot_hp = create_publisher<radar_interface::msg::GameRobotHP>("judge/game_robot_hp", rclcpp::SystemDefaultsQoS());
     pub_map_keyboard = create_publisher<radar_interface::msg::MapCommand>("judge/map_keyboard", rclcpp::SystemDefaultsQoS());
     pub_uwb_data = create_publisher<radar_interface::msg::UwbData>("judge/uwb_data", rclcpp::SystemDefaultsQoS());
+    pub_sentry_targets = create_publisher<radar_interface::msg::TargetArray>("judge/sentry_targets", rclcpp::SystemDefaultsQoS());
 
     // ============ 创建订阅者 ============
     // 接收其他节点的消息并转发至裁判系统
     sub_radar_cmd = create_subscription<std_msgs::msg::UInt8>("judge/radar_cmd", rclcpp::SystemDefaultsQoS(), std::bind(&JudgeBridgeNode::send_radar_cmd, this, std::placeholders::_1));
     sub_match_result = create_subscription<radar_interface::msg::MatchResult>("matcher/match_result", rclcpp::SystemDefaultsQoS(), std::bind(&JudgeBridgeNode::send_sentry_data, this, std::placeholders::_1));
-    sub_map_robot_data = create_subscription<radar_interface::msg::MatchResult>("matcher/match_result", rclcpp::SystemDefaultsQoS(), std::bind(&JudgeBridgeNode::send_map_robot_data, this, std::placeholders::_1));
+    sub_match_result_for_map = create_subscription<radar_interface::msg::MatchResult>("matcher/match_result", rclcpp::SystemDefaultsQoS(), std::bind(&JudgeBridgeNode::send_map_robot_data, this, std::placeholders::_1));
+    sub_detected_targets = create_subscription<radar_interface::msg::DetectedTargetArray>(
+        get_parameter("sentry_detected_targets_topic").as_string(),
+        rclcpp::SystemDefaultsQoS(),
+        std::bind(&JudgeBridgeNode::detected_targets_callback, this, std::placeholders::_1));
+    sub_enemy_outpost_alive = create_subscription<std_msgs::msg::Bool>(
+        get_parameter("enemy_outpost_alive_topic").as_string(),
+        rclcpp::SystemDefaultsQoS(),
+        std::bind(&JudgeBridgeNode::enemy_outpost_alive_callback, this, std::placeholders::_1));
     sub_custom_info = create_subscription<std_msgs::msg::String>("judge/custom_info", rclcpp::SystemDefaultsQoS(),
         [this](const std_msgs::msg::String& msg) {
             RCLCPP_INFO(get_logger(), "Custom Info: %s", msg.data.c_str());

@@ -16,11 +16,18 @@ import os
 
 debug = True
 use_real_lidar = LaunchConfiguration('use_real_lidar')
+bag_path = LaunchConfiguration('bag_path')
 
 node_params = os.path.join(
     get_package_share_directory('radar_bringup'),
     'config',
     'config.26.national.yaml'
+)
+
+default_bag_path = os.path.join(
+    '/home/ajian/radar_ros_ws-main',
+    'radar',
+    'rosbag2_2025_05_12-17_02_26'
 )
 
 
@@ -213,7 +220,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'startup_manual_align',
-            default_value='false',
+            default_value='true',
             description='Whether to run manual alignment on startup in bag mode'
         ),
         DeclareLaunchArgument(
@@ -225,6 +232,21 @@ def generate_launch_description():
             'default_team_color',
             default_value='blue',
             description='Default team color when judge_bridge is not running'
+        ),
+        DeclareLaunchArgument(
+            'bag_path',
+            default_value=default_bag_path,
+            description='Rosbag directory to play back for national offline testing'
+        ),
+        actions.ExecuteProcess(
+            cmd=[
+                'ros2', 'bag', 'play', bag_path,
+                '--clock',
+                '--remap',
+                '/livox/lidar:=/radar/lidar_mid70/pc_raw',
+                '/image_raw/compressed:=/radar/hik_6mm/image/compressed_raw',
+            ],
+            output='screen',
         ),
         *get_vision_container('hik_6mm'),
         get_xyzw_tf_broadcaster(

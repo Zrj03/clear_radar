@@ -1,6 +1,8 @@
 #include "TargetMap.h"
 #include "Clustering.h"
 #include "VoxelGrid.h"
+#include <algorithm>
+#include <numeric>
 
 using namespace pc_detector;
 
@@ -96,6 +98,47 @@ bool TargetMap::pass_new_target_hard_gate(const BoundingBox& aabb, size_t pt_num
         && area_xy >= params.min_new_target_area;
 }
 
+bool TargetMap::is_trail_cluster(size_t pt_num, const Eigen::Vector3d& grav) const
+{
+    if (!params.trail_filter_enabled)
+        return false;
+
+    const double min_speed = std::max(0.0, params.trail_filter_min_speed);
+    const double back_dist = std::max(0.0, params.trail_filter_back_dist);
+    const double side_dist = std::max(0.0, params.trail_filter_side_dist);
+    const double point_ratio = std::max(0.0, params.trail_filter_point_ratio);
+    const Eigen::Vector2d cluster_pos = grav(Eigen::seq(0, 1));
+
+    for (const auto& [id, target] : target_map) {
+        if (target.pt_num == 0)
+            continue;
+        if (point_ratio > 0.0 && static_cast<double>(pt_num) > static_cast<double>(target.pt_num) * point_ratio)
+            continue;
+
+        const Eigen::Vector2d velocity = target.kf.velocity_rel();
+        const double speed = velocity.norm();
+        if (speed < min_speed)
+            continue;
+
+        const Eigen::Vector2d dir = velocity / speed;
+        const Eigen::Vector2d rel = cluster_pos - target.kf.pos();
+        const double behind = -rel.dot(dir);
+        if (behind < back_dist)
+            continue;
+
+        const double side = std::abs(rel.x() * dir.y() - rel.y() * dir.x());
+        if (side > side_dist)
+            continue;
+
+        RCLCPP_DEBUG(params.node->get_logger(),
+            "TargetMap: filter trail cluster near target %d (points=%zu/%zu behind=%.2f side=%.2f speed=%.2f).",
+            id, pt_num, target.pt_num, behind, side, speed);
+        return true;
+    }
+
+    return false;
+}
+
 size_t TargetMap::try_new_target_with_confirmation(const BoundingBox& aabb, size_t pt_num, Eigen::Vector3d grav)
 {
     if (!pass_new_target_hard_gate(aabb, pt_num))
@@ -185,7 +228,21 @@ void TargetMap::post_update()
             continue;
         }
         if (it->second.pt_num > 0) {
-            it->second.kf.update(it->second.grav(Eigen::seq(0, 1)));
+            Eigen::Vector2d measurement = it->second.grav(Eigen::seq(0, 1));
+            if (params.static_smooth_enabled) {
+                const double max_speed = std::max(0.0, params.static_smooth_max_speed);
+                const double radius = std::max(0.0, params.static_smooth_radius);
+                const double alpha = std::clamp(params.static_smooth_alpha, 0.0, 1.0);
+                const double velocity_decay = std::clamp(params.static_smooth_velocity_decay, 0.0, 1.0);
+                const Eigen::Vector2d pos = it->second.kf.pos();
+                const double speed = it->second.kf.velocity_rel().norm();
+                const double dist = (measurement - pos).norm();
+                if (speed <= max_speed && dist <= radius) {
+                    measurement = pos * (1.0 - alpha) + measurement * alpha;
+                    it->second.kf.X(Eigen::seq(2, 3)) *= velocity_decay;
+                }
+            }
+            it->second.kf.update(measurement);
             it->second.lost_time = it->second.lost_time > 0 ? it->second.lost_time - 1 : 0;
         } else {
             it->second.kf.update();
@@ -226,6 +283,9 @@ void TargetMap::combine_force(size_t new_id, std::vector<size_t> old_ids)
 /// @brief 尝试匹配已经存在的跟踪目标, 进行更新
 size_t TargetMap::push(const BoundingBox& aabb, size_t pt_num, Eigen::Vector3d grav, const PointCloud& pc, bool no_strict)
 {
+    if (!no_strict && is_trail_cluster(pt_num, grav))
+        return TM_NOISE;
+
     int64_t min_id = -1;
     double min_dis = -1;
     std::vector<size_t> combine_id_list, combine_force_id_list, seperate_id_list;
@@ -348,9 +408,15 @@ void TargetMap::update(const PointCloud& pc, std::vector<int> &cluster_labels, s
     pre_update();
     /// 贪心算法
     // spdlog::info("TargetMap: Update {} clusters.", pcs.size());
-    for (size_t i = 0; i < pcs.size(); i++) {
+    std::vector<size_t> cluster_order(pcs.size());
+    std::iota(cluster_order.begin(), cluster_order.end(), 0);
+    std::sort(cluster_order.begin(), cluster_order.end(), [&pt_nums](size_t a, size_t b) {
+        return pt_nums[a] > pt_nums[b];
+    });
+    id_map.resize(pcs.size(), TM_NOISE);
+    for (size_t i : cluster_order) {
         // 对识别到的每个聚类交由 push 函数进行处理, 返回跟踪目标的 id
-        id_map.push_back(push(aabbs[i], pt_nums[i], grav[i], pc));
+        id_map[i] = push(aabbs[i], pt_nums[i], grav[i], pc);
     }
     // 对于没有匹配到的目标, 进行松弛查询
     loose_query(pc);

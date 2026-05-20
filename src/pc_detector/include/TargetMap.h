@@ -50,6 +50,16 @@ public:
         size_t min_new_target_confirmations;
         size_t new_target_confirm_max_gap;
         double new_target_candidate_dist;
+        bool trail_filter_enabled;
+        double trail_filter_min_speed;
+        double trail_filter_back_dist;
+        double trail_filter_side_dist;
+        double trail_filter_point_ratio;
+        bool static_smooth_enabled;
+        double static_smooth_max_speed;
+        double static_smooth_radius;
+        double static_smooth_alpha;
+        double static_smooth_velocity_decay;
         double z_zip;
         double loose_expand;
         struct {
@@ -75,6 +85,7 @@ private:
     std::function<Eigen::Vector3d(const Eigen::Vector3d&)> project_func;
     void element_update(size_t key, const BoundingBox& aabb, size_t pt_num, Eigen::Vector3d grav);
     bool pass_new_target_hard_gate(const BoundingBox& aabb, size_t pt_num) const;
+    bool is_trail_cluster(size_t pt_num, const Eigen::Vector3d& grav) const;
     size_t try_new_target_with_confirmation(const BoundingBox& aabb, size_t pt_num, Eigen::Vector3d grav);
     void pre_update();
     void post_update();

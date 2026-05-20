@@ -9,6 +9,7 @@
 #include <radar_interface/msg/detected_target_array.hpp>
 #include <radar_interface/msg/match_result.hpp>
 #include <radar_interface/msg/feedback_target_array.hpp>
+#include <radar_interface/team_color.hpp>
 
 class MatcherNode : public rclcpp::Node {
 public:
@@ -32,6 +33,7 @@ private:
     rclcpp::Subscription<radar_interface::msg::TargetArray>::SharedPtr target_sub;
     std::vector<rclcpp::Subscription<radar_interface::msg::DetectedTargetArray>::SharedPtr> detected_target_subs;
     rclcpp::Subscription<radar_interface::msg::FeedbackTargetArray>::SharedPtr feedback_sub;
+    rclcpp::Subscription<radar_interface::team_color::msg>::SharedPtr team_color_sub;
 
     rclcpp::Publisher<radar_interface::msg::MatchResult>::SharedPtr match_result_pub;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr vis_pub;
@@ -49,13 +51,18 @@ private:
     std::array<SlotSwitchState, 6> blue_slot_switch_states;
     std::array<SlotSwitchState, 6> red_slot_switch_states;
     radar_interface::msg::TargetArray last_targets;
+    radar_interface::team_color::ENUM color = radar_interface::team_color::C_BLUE;
 
     void target_callback(const radar_interface::msg::TargetArray::SharedPtr msg);
     void detected_target_callback(const radar_interface::msg::DetectedTargetArray::SharedPtr msg);
     void feedback_callback(const radar_interface::msg::FeedbackTargetArray::SharedPtr msg);
+    void team_color_callback(const radar_interface::team_color::msg& msg);
     void match_and_pub(const radar_interface::msg::TargetArray::SharedPtr msg);
     void vis_timer_callback();
     void pos_reinforce_timer_callback();
+    bool should_preserve_identity_on_visual_miss(long target_id) const;
+    bool is_enemy_slot(bool slot_is_blue) const;
+    bool is_in_enemy_lost_mark_rect(const radar_interface::msg::MatchedTarget& target) const;
 
     int pos_reinforce(float x, float y);
     int inner_pos_reinforce(float x, float y);

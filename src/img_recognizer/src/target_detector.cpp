@@ -2,6 +2,7 @@
 #include <cv_bridge/cv_bridge.h>
 #include <img_recognizer/target_detector.hpp>
 #include <ctime>
+#include <cmath>
 
 std::vector<TargetDetector::Target> TargetDetector::filter_targets(const cv::Point2i& img_size, const TargetArray::ConstSharedPtr& msg)
 {
@@ -67,14 +68,25 @@ cv::Mat TargetDetector::get_jigsaw_img(const cv::Mat& img, const std::vector<Squ
                 continue;
             cv::Mat roi_img;
             if (s.first.x < 0 || s.first.y < 0 || s.second.x >= img.cols || s.second.y >= img.rows) {
-                cv::Point2i p1(std::max(0, int(s.first.x)), std::max(0, int(s.first.y)));
-                cv::Point2i p2(std::min(img.cols - 1, int(s.second.x)), std::min(img.rows - 1, int(s.second.y)));
-                if (p1.x >= p2.x || p1.y >= p2.y)
+                const int square_x = static_cast<int>(std::floor(s.first.x));
+                const int square_y = static_cast<int>(std::floor(s.first.y));
+                const int square_w = static_cast<int>(std::ceil(s.second.x)) - square_x;
+                const int square_h = static_cast<int>(std::ceil(s.second.y)) - square_y;
+                if (square_w <= 0 || square_h <= 0)
                     continue;
-                int max_size = std::max(p2.x - p1.x, p2.y - p1.y);
-                roi_img = cv::Mat::zeros(max_size, max_size, CV_8UC3);
-                cv::Mat roi = img(cv::Rect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y));
-                roi.copyTo(roi_img(cv::Rect(0, 0, roi.cols, roi.rows)));
+
+                const int crop_x1 = std::max(0, square_x);
+                const int crop_y1 = std::max(0, square_y);
+                const int crop_x2 = std::min(img.cols, square_x + square_w);
+                const int crop_y2 = std::min(img.rows, square_y + square_h);
+                if (crop_x1 >= crop_x2 || crop_y1 >= crop_y2)
+                    continue;
+
+                roi_img = cv::Mat::zeros(square_h, square_w, CV_8UC3);
+                cv::Mat roi = img(cv::Rect(crop_x1, crop_y1, crop_x2 - crop_x1, crop_y2 - crop_y1));
+                const int dst_x = crop_x1 - square_x;
+                const int dst_y = crop_y1 - square_y;
+                roi.copyTo(roi_img(cv::Rect(dst_x, dst_y, roi.cols, roi.rows)));
             } else {
                 cv::Rect roi(s.first.x, s.first.y, s.second.x - s.first.x, s.second.y - s.first.y);
                 roi_img = img(roi);
